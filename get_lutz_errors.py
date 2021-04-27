@@ -6,29 +6,42 @@ from astropy.io import ascii
 from astropy.stats import biweight_location, biweight_scale
 
 lutz_errors = {}
-for appendix in ["", "_4", "_11"]:
-	# proper stacks
-	median_stacks = []
-	median_contsub_stacks = []
-	biweight_stacks = []
-	biweight_contsub_stacks = []
-	for fin in glob.glob("radial_profiles_empty_wlshift/*_proper_skymask_*.tab"):
-		tmp = ascii.read(fin)
-		median_stacks.append(tmp["median"+appendix])
-		median_contsub_stacks.append(tmp["median_contsub"+appendix])
-		biweight_stacks.append(tmp["weighted_biweight"+appendix])
-		biweight_contsub_stacks.append(tmp["weighted_biweight_contsub"+appendix])
+stack_lists = {}
+# proper stacks
 
-	std_median_stacks = np.nanstd(median_stacks, axis=0)
-	std_median_contsub_stacks = np.nanstd(median_contsub_stacks, axis=0)
-	std_wb_stacks = np.nanstd(biweight_stacks, axis=0)
-	std_wb_contsub_stacks = np.nanstd(biweight_contsub_stacks, axis=0)
+SN_65 = True
+if SN_65:
+	ff = glob.glob("radial_profiles_empty_wlshift/*_proper_multimask_sn_65_*_11.tab")
+else:
+	ff =  glob.glob("radial_profiles_empty_wlshift/*_proper_multimask_[!s]*.tab")
+tmp = ascii.read(ff[0])
 
-	lutz_errors["r/kpc"] = tmp["r/kpc"]
-	lutz_errors["std_median_stacks"+appendix] = std_median_stacks
-	lutz_errors["std_median_contsub_stacks"+appendix] = std_median_contsub_stacks
-	lutz_errors["std_wb_stacks"+appendix] = std_wb_stacks
-	lutz_errors["std_wb_contsub_stacks"+appendix] = std_wb_contsub_stacks
+for key in tmp.keys():
+	if key == "r/kpc":
+		lutz_errors[key] = tmp[key]
+		pass
+	elif key == "delta_r/kpc":
+		lutz_errors[key] = tmp[key]
+		pass
+	elif key[:3] == "err":
+		pass
+	else:
+		stack_lists[key] = []
 
-ascii.write(lutz_errors, "stack_errors_empirical_muse_skymask.tab")
-print("Wrote errors to stack_errors_empirical_muse_skymask.tab")
+i = 0
+for fin in ff:
+	i+=1
+	tmp = ascii.read(fin)
+
+	for key in stack_lists.keys():
+		stack_lists[key].append(tmp[key])
+print("number of files used: ", i)
+for key in stack_lists.keys():
+	lutz_errors[key] = np.nanstd(stack_lists[key], axis=0)
+
+if SN_65:
+	ascii.write(lutz_errors, "stack_errors_empirical_muse_multimask_sn_65_11.tab")
+	print("Wrote errors to stack_errors_empirical_muse_multimask_sn_65_11.tab")
+else:
+	ascii.write(lutz_errors, "stack_errors_empirical_muse_multimask.tab")
+	print("Wrote errors to stack_errors_empirical_muse_multimask.tab")
