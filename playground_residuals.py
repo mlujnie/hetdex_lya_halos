@@ -3,13 +3,23 @@ from astropy.coordinates import SkyCoord
 from hetdex_api.shot import *
 import numpy as np
 from astropy.io import ascii
+from astropy.stats import biweight_location, biweight_scale
+import sys
+import random
 
 sources = ascii.read("high_sn_sources.tab")
 sources = sources[sources["mask"]==1]
 print(len(sources))
 shot_ids = np.unique(sources["shotid"])
+print(len(shot_ids))
 
-for shotid in [20190105012]:
+#shot_ids_random = [shot_ids[random.randint(0, len(shot_ids))] for i in range(10)]
+#shot_ids_random = np.unique(shot_ids_random)
+shot_ids_random = [20190301015, 20190325015, 20190408032, 20190501026, 20190504020, 20190608020, 20190827018, 20191004017, 20191006027]
+shot_ids_random = [20190302032]
+print(shot_ids_random)
+
+for shotid in shot_ids_random:
 	fileh = open_shot_file(shotid)
 	tab = fileh.root.Data.Fibers[:]
 	ffskysub = tab["spec_fullsky_sub"].copy() 
@@ -37,18 +47,41 @@ for shotid in [20190105012]:
 	ffskysub[abs(medians_lo)>perc_lo] *= np.nan 
 	ffskysub[abs(medians_hi)>perc_hi] *= np.nan
 
-	continuum = np.zeros(ffskysub.shape) 
-	indices = np.arange(1036) 
-	for i in indices: 
-		idxhere = (indices >= filter_min[i])&(indices <= filter_max[i]) 
-		continuum[:,i] += np.nanmedian(ffskysub[:,idxhere], axis=1)
+	residual_0 = np.nanmedian(ffskysub, axis=0)
+	ffskysub = ffskysub - residual_0
 
-	continuum[continuum==0] = np.nan
-	continuum_subtracted = ffskysub.copy() - continuum
-	continuum_subtracted[continuum_subtracted==0.0] = np.nan
+	tab = {"wavelength": def_wave, "residual_0": residual_0}
 
-	residual = np.nanmedian(ffskysub, axis=0)
-	residual_continuum_subtracted = np.nanmedian(continuum_subtracted, axis=0)
+	POLYCONTSUB = False
 
-	tab = {"wavelength": def_wave, "residual": residual, "residual_contsub": residual_continuum_subtracted}
-	ascii.write(tab, "residuals_continuum_subtracted_vs_not_{}.tab".format(shotid))
+	if POLYCONTSUB:
+		for kappa in [1, 3, 4, 5, 10]:
+			continuum = []
+			for i in range(len(ffskysub)):
+				here = np.isfinite(ffskysub[i])
+				std = biweight_scale(ffskysub[i][here])
+				mid = biweight_location(ffskysub[i][here])
+				here *= abs(ffskysub[i] - mid) < kappa*std
+				if len(here[here]) < 1:
+					continuum.append(np.nan * def_wave)
+					continue
+				ps = np.polyfit(def_wave[here], ffskysub[i][here], 5)
+				continuum.append(ps[0] * def_wave**5 + ps[1] * def_wave**4 + ps[2] * def_wave**3 + ps[3] * def_wave**2 + ps[4] * def_wave + ps[5])
+			continuum = np.array(continuum)
+			continuum_subtracted = ffskysub.copy() - continuum
+			continuum_subtracted[continuum_subtracted==0.0] = np.nan
+
+			residual_continuum_subtracted = np.nanmedian(continuum_subtracted, axis=0)
+			tab["residual_contsub_{}".format(kappa)] = residual_continuum_subtracted
+	else:
+		continuum = np.zeros(ffskysub.shape)
+		indices = np.arange(1036)
+		for i in indices:
+			idxhere = (indices >= filter_min[i])&(indices <= filter_max[i])
+			continuum[:,i] += np.nanmedian(ffskysub[:,idxhere], axis=1)
+		continuum[continuum==0.0] = np.nan
+		continuum_subtracted = ffskysub.copy() - continuum
+		continuum_subtracted[continuum_subtracted==0.0] = np.nan
+		tab["residual_contsub"] = np.nanmedian(continuum_subtracted, axis=0)
+
+	ascii.write(tab, "residuals_continuum_subtraction_poly_{}.tab".format(shotid))

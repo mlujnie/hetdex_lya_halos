@@ -6,6 +6,7 @@ from astropy.cosmology import WMAP9
 import astropy.units as u
 import tables as tb
 import sys
+import os
 from scipy.interpolate import interpn
 from astropy.convolution import convolve_fft
 import time
@@ -29,6 +30,15 @@ import numpy as np
 #from astropy.stats.funcs import median_absolute_deviation
 import random
 from astropy.stats import biweight_location, biweight_midvariance, median_absolute_deviation
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-d", "--dir_apx", type=str, default="_newflag",
+                    help="Directory appendix.")
+args = parser.parse_args(sys.argv[1:])
+
+DIR_APX = args.dir_apx
+print("Directory appendix: ", DIR_APX)
 
 
 def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
@@ -170,18 +180,24 @@ def get_stack_proper(r_bins_min, r_bins_max, data_r, data_flux, data_redshift, k
 
 # read in data
 sources = ascii.read("../karls_suggestion/high_sn_sources.tab")
-sources["mask"] = sources["mask"].astype(bool)
-sources = sources[sources["mask"]]
+sources = sources[sources["mask"]==1]
 sources = sources[sources["sn"]>6.5]
+#sources = sources[sources["wave"] - 1.5*sources["linewidth"] > 3750]
+print(len(sources), " sources remaining.")
 
 # get the luminosity
 z_lae = (sources["wave"]/1215.67)-1
 z_lae_err = (sources["wave_err"]/1215.67)
 sources["redshift"] = z_lae
-luminositites = sources["flux_213"]*cosmo.luminosity_distance(z_lae)**2*4*np.pi/u.Mpc**2
-sources["luminosity"] = luminositites
-c = 3*10**8 # m/s
-sources["linewidth_km/s"] = c*sources["linewidth"]/sources["wave"] *1/1000.
+sources["luminosity"] = (sources["flux_213"])*1e-17*4*np.pi*(cosmo.luminosity_distance(sources["redshift"]).to(u.cm)/u.cm)**2
+c = 3*10**5 # km/s
+doppler_v_of = c * sources["linewidth"] / sources["wave"]
+sources["linewidth_km/s"] = doppler_v_of
+
+new_mask = (sources["sn"]>6.5)&(sources["luminosity"]<10**43)&(sources["linewidth_km/s"]<1000)&(sources["gmag"]>24)
+sources = sources[new_mask]
+
+print("len(sources) = ", len(sources))
 
 lae_masks = {
 	"all": [True for i in range(len(sources))],
@@ -189,8 +205,8 @@ lae_masks = {
 	"sn<=6.5" : sources["sn"] <= 6.5,
 	"linewidth<1000km/s": sources["linewidth_km/s"] < 1000,
 	"linewidth>=1000km/s": sources["linewidth_km/s"] >= 1000,
-	"z<2.75" : sources["redshift"] < 2.75,
-	"z>=2.75": sources["redshift"] >= 2.75,
+	"z<2.5" : sources["redshift"] < 2.5,
+	"z>=2.5": sources["redshift"] >= 2.5,
 	"sn>10": sources["sn"] > 10,
 	"sn<=10": sources["sn"] <= 10,
 	"L>mean(L)": sources["luminosity"] > np.nanmean(sources["luminosity"]),
@@ -203,6 +219,9 @@ long_lae_masks = {}
 for key in lae_masks.keys():
 	long_lae_masks[key] = []
 
+savedir = "/scratch/05865/maja_n"
+#"/work2/05865/maja_n/stampede2/master"
+
 # real LAE data
 print("Reading LAEs...")
 long_list = []
@@ -212,7 +231,7 @@ for source_idx in range(len(sources)):
 	source = sources[source_idx]
 
 	detectid = source["detectid"]
-	lae_file = "../radial_profiles/laes_skymask/lae_{}.dat".format(detectid)
+	lae_file = os.path.join(savedir, "radial_profiles/laes{}/lae_{}.dat".format(DIR_APX, detectid))
 	lae_file = glob.glob(lae_file)[0]
 	try:
 		lae_tab = ascii.read(lae_file)
@@ -239,9 +258,20 @@ long_tab["mask_7"] = (long_tab["mask_7"]=="True").astype(bool)
 long_tab["mask_10"] = (long_tab["mask_10"]=="True").astype(bool)
 
 print("See if masking works: ", len(long_tab), len(long_tab[long_tab["mask_7"]]))
-for mask_name in long_lae_masks.keys():
-	long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[long_tab["mask_7"]]
-long_tab = long_tab[long_tab["mask_7"]]
+
+MASK_CONTINUUM_FIBERS = False
+print("\nmasking continuum fibers: ", MASK_CONTINUUM_FIBERS)
+if MASK_CONTINUUM_FIBERS:
+	for mask_name in long_lae_masks.keys():
+		long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[long_tab["mask_7"]]
+	long_tab = long_tab[long_tab["mask_7"]]
+
+NEW_FLAG = False
+print("\nmasking with Karl's new flagging method: ", NEW_FLAG)
+if NEW_FLAG:
+	for mask_name in long_lae_masks.keys():
+		long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[long_tab["new_mask_5"]]
+	long_tab = long_tab[long_tab["new_mask_5"]]
 
 # getting the stacks
 kpc_per_arcsec_mid = cosmo.kpc_proper_per_arcmin(2.5)/60*u.arcmin/u.kpc
@@ -258,22 +288,22 @@ r_bins_xbars = (r_bins_max-r_bins)/2.
 
 big_tab_proper = {}
 
-EXTENSION = "flux_contsub_11"
+EXTENSION = "flux_troughsub"
 
 
 for mask_name in lae_masks.keys():
 	here = long_lae_masks[mask_name]
 	r_kpc, sb_median_kpc, e_sb_median_kpc = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"][here], long_tab[EXTENSION][here], long_tab["redshift"][here])
-	big_tab_proper["median_contsub_"+mask_name] = sb_median_kpc
-	big_tab_proper["err_median_contsub_"+mask_name] = e_sb_median_kpc
+	big_tab_proper["median_troughsub_"+mask_name] = sb_median_kpc
+	big_tab_proper["err_median_troughsub_"+mask_name] = e_sb_median_kpc
 
 big_tab_proper["r/kpc"] = r_kpc
 big_tab_proper["delta_r/kpc"] = r_bins_kpc_xbars
 
-r_kpc, big_tab_proper["median_no_contsub_all"], big_tab_proper["err_median_no_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux"], long_tab["redshift"])
-r_kpc, big_tab_proper["mean_contsub_all"], big_tab_proper["err_mean_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
-r_kpc, big_tab_proper["biweight_contsub_all"], big_tab_proper["err_biweight_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
+r_kpc, big_tab_proper["median_no_troughsub_all"], big_tab_proper["err_median_no_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux"], long_tab["redshift"])
+r_kpc, big_tab_proper["mean_troughsub_all"], big_tab_proper["err_mean_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
+r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
 
 
-ascii.write(big_tab_proper, "radial_profiles_proper_multimasks_sn_65_11.tab")
+ascii.write(big_tab_proper, f"radial_profiles_proper_multimasks_new_mask{DIR_APX}_unflagged.tab")
 

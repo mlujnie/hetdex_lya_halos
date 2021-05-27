@@ -6,6 +6,7 @@ from astropy.cosmology import WMAP9
 import astropy.units as u
 import tables as tb
 import sys
+import os
 from scipy.interpolate import interpn
 from astropy.convolution import convolve_fft
 import time
@@ -100,6 +101,8 @@ def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
 sources = ascii.read("high_sn_sources.tab")
 sources = sources[sources["mask"]==1]
 sources = sources[sources["sn"]>6.5]
+sources = sources[sources["wave"] - 1.5*sources["linewidth"] > 3750]
+print(len(sources), " sources remaining.")
 
 # get the luminosity
 z_lae = (sources["wave"]/1215.67)-1
@@ -116,8 +119,8 @@ lae_masks = {
 	"sn<=6.5" : sources["sn"] <= 6.5,
 	"linewidth<1000km/s": sources["linewidth_km/s"] < 1000,
 	"linewidth>=1000km/s": sources["linewidth_km/s"] >= 1000,
-	"z<2.75" : sources["redshift"] < 2.75,
-	"z>=2.75": sources["redshift"] >= 2.75,
+	"z<2.5" : sources["redshift"] < 2.5,
+	"z>=2.5": sources["redshift"] >= 2.5,
 	"sn>10": sources["sn"] > 10,
 	"sn<=10": sources["sn"] <= 10,
 	"L>mean(L)": sources["luminosity"] > np.nanmean(sources["luminosity"]),
@@ -131,6 +134,9 @@ for key in lae_masks.keys():
 	long_lae_masks[key] = []
 
 # new bogus LAEs
+
+savedir = "/scratch/05865/maja_n"
+
 print("Reading bogus LAEs...")
 bogus_list = []
 i=0
@@ -138,67 +144,50 @@ N = len(sources)
 for source_idx in range(len(sources)):
 	source = sources[source_idx]
 	detectid = source["detectid"]
-	lae_file = "../radial_profiles/bogus_laes_skymask/bogus_0_{}.dat".format(detectid)
-	try:
-		lae_file = glob.glob(lae_file)[0]
-		lae_tab = ascii.read(lae_file)
-		lae_tab["mask_7"] = np.array(lae_tab["mask_7"]=="True").astype(int)
-		lae_tab["mask_10"] = np.array(lae_tab["mask_10"]=="True").astype(int)
-		bogus_list.append(lae_tab)
+	for j in range(5):
+		lae_file = os.path.join(savedir,"radial_profiles/bogus_laes/bogus_{}_{}.dat".format(j,detectid))
+		try:
+			lae_file = glob.glob(lae_file)[0]
+			lae_tab = ascii.read(lae_file)
+			lae_tab["mask_7"] = np.array(lae_tab["mask_7"]=="True").astype(int)
+			lae_tab["mask_10"] = np.array(lae_tab["mask_10"]=="True").astype(int)
+			bogus_list.append(lae_tab)
 
 
-		for mask_name in lae_masks.keys():
-			for j in range(len(lae_tab)):
-				long_lae_masks[mask_name].append(lae_masks[mask_name][source_idx])
+			for mask_name in lae_masks.keys():
+				for j in range(len(lae_tab)):
+					long_lae_masks[mask_name].append(lae_masks[mask_name][source_idx])
 
 
-		i+=1
-		if i%100 == 0:
-			print(f"Finished {i}/{N}")
-	except Exception as e:
-		print(e)
-		break
-		print("Failed to read "+lae_file)
-
-	lae_file = "../radial_profiles/bogus_laes_skymask/bogus_1_{}.dat".format(detectid)
-	try:
-		lae_file = glob.glob(lae_file)[0]
-		lae_tab = ascii.read(lae_file)
-		lae_tab["mask_7"] = np.array(lae_tab["mask_7"]=="True").astype(int)
-		lae_tab["mask_10"] = np.array(lae_tab["mask_10"]=="True").astype(int)
-		bogus_list.append(lae_tab)
-		i+=1
-		if i%100 == 0:
-			print(f"Finished {i}/{N}")
-
-
-		for mask_name in lae_masks.keys():
-			for j in range(len(lae_tab)):
-				long_lae_masks[mask_name].append(lae_masks[mask_name][source_idx])
-
-
-	except Exception as e:
-		print("Failed to read "+lae_file)
-
+			i+=1
+			if i%100 == 0:
+				print(f"Finished {i}/{N}")
+		except Exception as e:
+			print(e)
+			break
+			print("Failed to read "+lae_file)
 
 bogus_tab = vstack(bogus_list)
 bogus_tab["mask_7"] = bogus_tab["mask_7"].astype(bool)
 bogus_tab["mask_10"] = bogus_tab["mask_10"].astype(bool)
 print("See if masking works: ", len(bogus_tab), len(bogus_tab[bogus_tab["mask_7"]]))
 
-for mask_name in long_lae_masks.keys():
-	long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[bogus_tab["mask_7"]]
-bogus_tab = bogus_tab[bogus_tab["mask_7"]]
-
 
 # bogus values
 bogus_dict = {}
 fiber_area = np.pi*(0.75)**2
-
 for key in ["flux", "flux_contsub", "flux_4", "flux_contsub_4", "flux_11", "flux_contsub_11"]:
 	bogus_tab[key] = bogus_tab[key] / fiber_area
 
-EXTENSION = "flux_contsub_11"
+MASK_CONTINUUM_FIBERS = False
+print("mask continuum fibers: ", MASK_CONTINUUM_FIBERS)
+if MASK_CONTINUUM_FIBERS:
+	for mask_name in long_lae_masks.keys():
+		long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[bogus_tab["mask_7"]]
+	bogus_tab = bogus_tab[bogus_tab["mask_7"]]
+
+
+EXTENSION = "flux_contsub"
 
 for mask_name in long_lae_masks.keys():
 	mask = long_lae_masks[mask_name]
@@ -244,5 +233,5 @@ bogus_dict["err_median_contsub_11_all"] = [biweight_scale(total_randoms, ignore_
 bogus_dict["err_median_contsub_11_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
 bogus_dict["err_median_contsub_11d_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 
-ascii.write(bogus_dict, "random_sky_values_multimasks_sn_65_11.tab")
+ascii.write(bogus_dict, "random_sky_values_multimasks_sn_65_unmasked.tab")
 print("Wrote to random_sky_values_multimasks.tab")

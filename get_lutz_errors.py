@@ -11,7 +11,7 @@ stack_lists = {}
 
 SN_65 = True
 if SN_65:
-	ff = glob.glob("radial_profiles_empty_wlshift/*_proper_multimask_sn_65_*_11.tab")
+	ff = glob.glob("radial_profiles_empty_wlshift/*_proper_multimask_sn_65_*_unmasked.tab")
 else:
 	ff =  glob.glob("radial_profiles_empty_wlshift/*_proper_multimask_[!s]*.tab")
 tmp = ascii.read(ff[0])
@@ -40,8 +40,9 @@ for key in stack_lists.keys():
 	lutz_errors[key] = np.nanstd(stack_lists[key], axis=0)
 
 if SN_65:
-	ascii.write(lutz_errors, "stack_errors_empirical_muse_multimask_sn_65_11.tab")
-	print("Wrote errors to stack_errors_empirical_muse_multimask_sn_65_11.tab")
+	filename = "stack_errors_empirical_muse_multimask_sn_65_unmasked.tab"
+	ascii.write(lutz_errors, filename)
+	print("Wrote to ", filename)
 else:
 	ascii.write(lutz_errors, "stack_errors_empirical_muse_multimask.tab")
 	print("Wrote errors to stack_errors_empirical_muse_multimask.tab")
