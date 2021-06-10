@@ -26,7 +26,8 @@ parser.add_argument("-l","--local", type=str, default="False",
 parser.add_argument("-nf", "--newflag", type=str, default="True",
 		help="Use Karl's new flagging method.")
 parser.add_argument("-sr", "--subtract_residual", type=str, default="False", help="Subtract average spectrum after masking continuum fibers.")
-parser.add_argument("-bc", "--background_correction", type=str, default="True", help="Add wavelength-dependent background correction.")
+parser.add_argument("-bc", "--background_correction", type=str, default="False", help="Add wavelength-dependent background correction.")
+parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -74,6 +75,15 @@ elif args.background_correction == "False":
 else:
 	print("Could not identify a valid argument for background_correction: True or False.")
 
+if args.farout == "True":
+	FAR_OUT = True
+	DIR_APX = DIR_APX + "_100"
+	print("Going out to 100''.")
+elif args.farout == "False":
+	FAR_OUT = False
+	print("Going out to 20''.")
+else:
+	print("Could not identify a valid argument for farout: True or False.")
 print("Final directory appendix: "+DIR_APX)
 
 
@@ -92,7 +102,10 @@ def save_lae(detectid):
 	lae_ra, lae_dec = lae["ra"], lae["dec"]
 	lae_coords = SkyCoord(ra = lae_ra*u.deg, dec = lae_dec*u.deg)
 	rs = lae_coords.separation(shot_coords)
-	mask = rs <= 20*u.arcsec
+	if FAR_OUT:
+		mask = rs <= 100*u.arcsec
+	else:
+		mask = rs <= 20*u.arcsec
 	rs = rs[mask]
 	spec_here = ffskysub[mask]
 	err_here = spec_err[mask]
@@ -162,6 +175,8 @@ def save_lae(detectid):
 				print(cutoff, perc)
 				highest = averages > perc
 				new_mask_dict[cutoff][highest] = 0
+			new_mask_dict[0] = np.ones(len(spec_here), dtype=int)
+			new_mask_dict[0][new_mask_tmp == 0] = 0
 			
 			new_masks.append(new_mask_dict)
 		new_mask = {}
@@ -412,6 +427,16 @@ complete_lae_tab = complete_lae_tab[order]
 # include only high-S/N LAEs and exclude LAEs in large-residual areas.
 #complete_lae_tab = complete_lae_tab[complete_lae_tab["sn"]>6.5]
 #complete_lae_tab = complete_lae_tab[complete_lae_tab["wave"] - 1.5*complete_lae_tab["linewidth"] >3750]
+
+core_spectra_path = os.path.join(savedir, f"core_spectra_unflagged{DIR_APX}")
+lae_path = os.path.join(savedir, f"radial_profiles/laes{DIR_APX}")
+lae_offset_path = os.path.join(savedir, f"radial_profiles/laes_wloffset{DIR_APX}")
+for path in [core_spectra_path, lae_path, lae_offset_path]:
+	if not os.path.exists(path):
+		os.mkdir(path)
+		print("Creating path", path)
+	else:
+		print("Path already exists", path)
 
 # this is Dustin's list of LAEs
 #complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "dustins_full_detids.dets"))

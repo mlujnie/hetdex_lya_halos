@@ -29,17 +29,32 @@ import numpy as np
 #from astropy.stats.funcs import median_absolute_deviation
 import random
 from astropy.stats import biweight_location, biweight_midvariance, median_absolute_deviation
+import logging
 import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--dir_apx", type=str, default="_newflag",
                     help="Directory appendix.")
+parser.add_argument('-s', '--final_dir', type=str, default=".", help='Directory to save radial profiles. This is necessary to add.')
+parser.add_argument('--mask_continuum', type=str, default='False', help='Mask continuum fibers: True or False.')
+parser.add_argument('--sn_65', type=str, default='True', help='Use only sources with S/N>6.5: True or False.')
+parser.add_argument('--sfg', type=str, default='True', help='Use SFG sample: True or False. If False, use AGN sample.')
+parser.add_argument('--intwidth', type=str, default='', help='Appendix for the fixed integration width: nothing, _4, or _11.')
 args = parser.parse_args(sys.argv[1:])
 
+fmtstr = " Name: %(user_name)s : %(asctime)s: (%(filename)s): %(levelname)s: %(funcName)s Line: %(lineno)d - %(message)s"
+datestr = "%m/%d/%Y %I:%M:%S %p "
+#basic logging config
+logging.basicConfig(
+        filename=os.path.join(args.final_dir, "save_lutz_errors.log"),
+        level=logging.DEBUG,
+        filemode="w",
+        datefmt=datestr,
+)
+
+
 DIR_APX = args.dir_apx
-print("Directory appendix: ", DIR_APX)
-
-
+logging.info("Directory appendix: "+ DIR_APX)
 
 def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
 	""" weighted biweight location a la Karl
@@ -91,7 +106,6 @@ def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
 
 	# now remove the outlier points
 	mask = (np.abs(u) >= 1)
-	#print("number of excluded points ", len(mask[mask]))
 	
 	u = (1 - u ** 2) ** 2
 	
@@ -182,11 +196,8 @@ save_dir = "/scratch/05865/maja_n"
 basedir = "/work2/05865/maja_n/stampede2/master"
 
 # read in data
-sources = ascii.read(os.path.join(basedir,"karls_suggestion/high_sn_sources.tab"))
+sources = ascii.read("../karls_suggestion/high_sn_sources.tab")
 sources = sources[sources["mask"]==1]
-sources = sources[sources["sn"]>6.5]
-#sources = sources[sources["wave"] - 1.5*sources["linewidth"] > 3750]
-print(len(sources), " sources remaining.")
 
 # get the luminosity
 z_lae = (sources["wave"]/1215.67)-1
@@ -197,26 +208,43 @@ c = 3*10**5 # km/s
 doppler_v_of = c * sources["linewidth"] / sources["wave"]
 sources["linewidth_km/s"] = doppler_v_of
 
-new_mask = (sources["sn"]>6.5)&(sources["luminosity"]<10**43)&(sources["linewidth_km/s"]<1000)&(sources["gmag"]>24)
-sources = sources[new_mask]
+total_mask = np.ones(len(sources), dtype=bool)
 
-print("len(sources) = ", len(sources))
+SN_65 = (args.sn_65 == 'True')
+if SN_65:
+	logging.info('Including only S/N>6.5.')
+	total_mask = total_mask * (sources['sn']>6.5)
+else:
+	logging.info('Including all S/N>5.5.')
+
+narrow_lines = sources["linewidth_km/s"] < 1000/2.35
+low_luminosity = sources["luminosity"] < 10**43
+low_continuum = sources["gmag"] > 24
+sfg_sample = narrow_lines & low_luminosity & low_continuum
+agn_sample = ~sfg_sample
+
+SFG_SAMPLE = (args.sfg == 'True')
+AGN_SAMPLE = ~SFG_SAMPLE
+
+if SFG_SAMPLE:
+	logging.info('Using SFG sample.')
+	sources = sources[total_mask * sfg_sample]
+else:
+	logging.info('Using AGN-dominated sample.')
+	sources = sources[total_mask * agn_sample]
+	
+logging.info("len(sources) = {}".format( len(sources)))
 
 lae_masks = {
 	"all": [True for i in range(len(sources))],
-	"sn>6.5" : sources["sn"] > 6.5,
-	"sn<=6.5" : sources["sn"] <= 6.5,
-	"linewidth<1000km/s": sources["linewidth_km/s"] < 1000,
-	"linewidth>=1000km/s": sources["linewidth_km/s"] >= 1000,
 	"z<2.5" : sources["redshift"] < 2.5,
 	"z>=2.5": sources["redshift"] >= 2.5,
 	"sn>10": sources["sn"] > 10,
 	"sn<=10": sources["sn"] <= 10,
-	"L>mean(L)": sources["luminosity"] > np.nanmean(sources["luminosity"]),
-	"L<=mean(L)": sources["luminosity"] <= np.nanmean(sources["luminosity"]),
-	"linewidth<=mean(linewidth)": sources["linewidth_km/s"] <= np.nanmean(sources["linewidth_km/s"]),
-	"linewidth>mean(linewidth)": sources["linewidth_km/s"] > np.nanmean(sources["linewidth_km/s"])
-}
+	"L>median(L)": sources["luminosity"] > np.nanmedian(sources["luminosity"]),
+	"L<=median(L)": sources["luminosity"] <= np.nanmedian(sources["luminosity"]),
+	"linewidth<=median(linewidth)": sources["linewidth_km/s"] <= np.nanmedian(sources["linewidth_km/s"]),
+	"linewidth>median(linewidth)": sources["linewidth_km/s"] > np.nanmedian(sources["linewidth_km/s"])}
 
 # getting the stacks
 kpc_per_arcsec_mid = cosmo.kpc_proper_per_arcmin(2.5)/60*u.arcmin/u.kpc
@@ -243,12 +271,12 @@ for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
 		long_lae_masks[key] = []
 
 
-	save_file = "radial_profiles_empty_wlshift/radial_profiles_proper_multimask_sn_65{}_{}.tab".format(DIR_APX, d_wl)
-	if os.path.exists(save_file):
-		print("Skipping ", save_file, ": already exists.")
+	save_file = os.path.join(args.final_dir, "radial_profiles_empty_wlshift/radial_profiles_proper_multimask_{}_{}.tab".format(DIR_APX, d_wl))
+	if False: #os.path.exists(save_file):
+		logging.info(f"Skipping {save_file}: already exists.")
 		continue
 
-	print("Reading LAEs...", d_wl)
+	logging.info("Reading LAEs... {}".format( d_wl))
 	long_list = []
 	i=0
 	N = len(sources)
@@ -273,26 +301,26 @@ for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
 
 			i+=1
 			if i%100 == 0:
-				print(f"Finished {i}/{N}")
+				logging.info(f"Finished {i}/{N}")
 		except Exception as e:
-			print("Failed to read "+lae_file)
+			logging.error("Failed to read "+lae_file)
 	try: 
 		long_tab = vstack(long_list)
 	except Exception as e:
-		print("Vstack failed:")
-		print(e)
+		logging.error("Vstack failed:")
+		logging.error(e)
 	#long_tab["mask_7"] = (long_tab["mask_7"]=="True").astype(bool)
 	#long_tab["mask_10"] = (long_tab["mask_10"]=="True").astype(bool)
 
-	MASK_CONTINUUM_FIBERS = False
-	print("mask continuum fibers: ", MASK_CONTINUUM_FIBERS)
+	MASK_CONTINUUM_FIBERS = (args.mask_continuum == 'True')
+	logging.info("mask continuum fibers: {}".format( MASK_CONTINUUM_FIBERS))
 	if MASK_CONTINUUM_FIBERS:
 		for mask_name in long_lae_masks.keys():
 			long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[long_tab["mask_7"]]
 		long_tab = long_tab[long_tab["mask_7"]]
 
 	NEW_FLAG = False
-	print("\nmasking with Karl's new flagging method: ", NEW_FLAG)
+	logging.info("\nmasking with Karl's new flagging method: {}".format( NEW_FLAG))
 	if NEW_FLAG:
 		for mask_name in long_lae_masks.keys():
 			long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[long_tab["new_mask_5"]]
@@ -314,7 +342,8 @@ for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
 
 	big_tab_proper = {}
 
-	EXTENSION = "flux_troughsub"
+	EXTENSION = "flux_troughsub"+args.intwidth
+	logging.info(f"Extension: {EXTENSION}")
 
 
 	for mask_name in lae_masks.keys():
@@ -330,6 +359,6 @@ for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
 	r_kpc, big_tab_proper["mean_troughsub_all"], big_tab_proper["err_mean_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
 	r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
 
-	save_file = "radial_profiles_empty_wlshift/radial_profiles_proper_multimask_sn_65{}_unflagged_{}.tab".format(DIR_APX, d_wl)
+	save_file = os.path.join(args.final_dir, "radial_profiles_empty_wlshift/radial_profiles_proper_multimask{}_{}.tab".format(DIR_APX, d_wl))
 	ascii.write(big_tab_proper, save_file)
-	print("Wrote to ", save_file)
+	logging.info("Wrote to {}".format( save_file))

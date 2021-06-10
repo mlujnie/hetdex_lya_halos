@@ -30,7 +30,37 @@ import numpy as np
 #from astropy.stats.funcs import median_absolute_deviation
 import random
 from astropy.stats import biweight_location, biweight_midvariance, median_absolute_deviation
+import argparse
+import logging
 
+parser = argparse.ArgumentParser()
+parser.add_argument("-d", "--dir_apx", type=str, default="_newflag",
+                    help="Directory appendix.")
+parser.add_argument('-s', '--final_dir', type=str, default=".", help='Directory to save radial profiles. This is necessary to add.')
+parser.add_argument('--mask_continuum', type=str, default='False', help='Mask continuum fibers: True or False.')
+parser.add_argument('--sn_65', type=str, default='True', help='Use only sources with S/N>6.5: True or False.')
+parser.add_argument('--sfg', type=str, default='True', help='Use SFG sample: True or False. If False, use AGN sample.')
+parser.add_argument('--intwidth', type=str, default='', help='Appendix for the fixed integration width: nothing, _4, or _11.')
+args = parser.parse_args(sys.argv[1:])
+
+fmtstr = " Name: %(user_name)s : %(asctime)s: (%(filename)s): %(levelname)s: %(funcName)s Line: %(lineno)d - %(message)s"
+datestr = "%m/%d/%Y %I:%M:%S %p "
+#basic logging config
+logging.basicConfig(
+	filename=os.path.join(args.final_dir, "random_sky_value.log"),
+	level=logging.DEBUG,
+	filemode="w",
+	datefmt=datestr,
+)
+
+
+DIR_APX = args.dir_apx
+logging.info("Directory appendix: "+ DIR_APX)
+
+if args.final_dir is ".":
+	logging.error("You must provide a directory to save the radial profiles with -s DIRECTORY.")
+	sys.exit()
+final_dir = args.final_dir
 
 def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
 	""" weighted biweight location a la Karl
@@ -82,7 +112,6 @@ def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
 
 	# now remove the outlier points
 	mask = (np.abs(u) >= 1)
-	#print("number of excluded points ", len(mask[mask]))
 	
 	u = (1 - u ** 2) ** 2
 	
@@ -97,36 +126,56 @@ def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
 	# the median value will be returned along that axis
 	return M.squeeze() + (d * u).sum(axis=axis) / u.sum(axis=axis)
 
-# read source list
-sources = ascii.read("high_sn_sources.tab")
+# read in data
+sources = ascii.read("../karls_suggestion/high_sn_sources.tab")
 sources = sources[sources["mask"]==1]
-sources = sources[sources["sn"]>6.5]
-sources = sources[sources["wave"] - 1.5*sources["linewidth"] > 3750]
-print(len(sources), " sources remaining.")
 
 # get the luminosity
 z_lae = (sources["wave"]/1215.67)-1
 z_lae_err = (sources["wave_err"]/1215.67)
 sources["redshift"] = z_lae
-luminositites = sources["flux_213"]*cosmo.luminosity_distance(z_lae)**2*4*np.pi/u.Mpc**2
-sources["luminosity"] = luminositites
-c = 3*10**8 # m/s
-sources["linewidth_km/s"] = c*sources["linewidth"]/sources["wave"] *1/1000.
+sources["luminosity"] = (sources["flux_213"])*1e-17*4*np.pi*(cosmo.luminosity_distance(sources["redshift"]).to(u.cm)/u.cm)**2
+c = 3*10**5 # km/s
+doppler_v_of = c * sources["linewidth"] / sources["wave"]
+sources["linewidth_km/s"] = doppler_v_of
+
+total_mask = np.ones(len(sources), dtype=bool)
+
+SN_65 = (args.sn_65 == 'True')
+if SN_65:
+	logging.info('Including only S/N>6.5.')
+	total_mask = total_mask * (sources['sn']>6.5)
+else:
+	logging.info('Including all S/N>5.5.')
+
+narrow_lines = sources["linewidth_km/s"] < 1000/2.35
+low_luminosity = sources["luminosity"] < 10**43
+low_continuum = sources["gmag"] > 24
+sfg_sample = narrow_lines & low_luminosity & low_continuum
+agn_sample = ~sfg_sample
+
+SFG_SAMPLE = (args.sfg == 'True')
+AGN_SAMPLE = ~SFG_SAMPLE
+
+if SFG_SAMPLE:
+	logging.info('Using SFG sample.')
+	sources = sources[total_mask * sfg_sample]
+else:
+	logging.info('Using AGN-dominated sample.')
+	sources = sources[total_mask * agn_sample]
+	
+logging.info("len(sources) = {}".format( len(sources)))
 
 lae_masks = {
 	"all": [True for i in range(len(sources))],
-	"sn>6.5" : sources["sn"] > 6.5,
-	"sn<=6.5" : sources["sn"] <= 6.5,
-	"linewidth<1000km/s": sources["linewidth_km/s"] < 1000,
-	"linewidth>=1000km/s": sources["linewidth_km/s"] >= 1000,
 	"z<2.5" : sources["redshift"] < 2.5,
 	"z>=2.5": sources["redshift"] >= 2.5,
 	"sn>10": sources["sn"] > 10,
 	"sn<=10": sources["sn"] <= 10,
-	"L>mean(L)": sources["luminosity"] > np.nanmean(sources["luminosity"]),
-	"L<=mean(L)": sources["luminosity"] <= np.nanmean(sources["luminosity"]),
-	"linewidth<=mean(linewidth)": sources["linewidth_km/s"] <= np.nanmean(sources["linewidth_km/s"]),
-	"linewidth>mean(linewidth)": sources["linewidth_km/s"] > np.nanmean(sources["linewidth_km/s"])
+	"L>median(L)": sources["luminosity"] > np.nanmedian(sources["luminosity"]),
+	"L<=median(L)": sources["luminosity"] <= np.nanmedian(sources["luminosity"]),
+	"linewidth<=median(linewidth)": sources["linewidth_km/s"] <= np.nanmedian(sources["linewidth_km/s"]),
+	"linewidth>median(linewidth)": sources["linewidth_km/s"] > np.nanmedian(sources["linewidth_km/s"])
 }
 
 long_lae_masks = {}
@@ -137,15 +186,15 @@ for key in lae_masks.keys():
 
 savedir = "/scratch/05865/maja_n"
 
-print("Reading bogus LAEs...")
+logging.info("Reading bogus LAEs...")
 bogus_list = []
 i=0
 N = len(sources)
 for source_idx in range(len(sources)):
 	source = sources[source_idx]
 	detectid = source["detectid"]
-	for j in range(5):
-		lae_file = os.path.join(savedir,"radial_profiles/bogus_laes/bogus_{}_{}.dat".format(j,detectid))
+	for j in range(3):
+		lae_file = os.path.join(savedir,"radial_profiles/bogus_laes{}/bogus_{}_{}.dat".format(DIR_APX, j,detectid))
 		try:
 			lae_file = glob.glob(lae_file)[0]
 			lae_tab = ascii.read(lae_file)
@@ -161,77 +210,86 @@ for source_idx in range(len(sources)):
 
 			i+=1
 			if i%100 == 0:
-				print(f"Finished {i}/{N}")
+				logging.info(f"Finished {i}/{N}")
 		except Exception as e:
-			print(e)
+			logging.error(e)
 			break
-			print("Failed to read "+lae_file)
+			logging.error("Failed to read "+lae_file)
 
 bogus_tab = vstack(bogus_list)
 bogus_tab["mask_7"] = bogus_tab["mask_7"].astype(bool)
 bogus_tab["mask_10"] = bogus_tab["mask_10"].astype(bool)
-print("See if masking works: ", len(bogus_tab), len(bogus_tab[bogus_tab["mask_7"]]))
+logging.info("See if masking works: {}".format( len(bogus_tab), len(bogus_tab[bogus_tab["mask_7"]])))
 
 
 # bogus values
 bogus_dict = {}
 fiber_area = np.pi*(0.75)**2
-for key in ["flux", "flux_contsub", "flux_4", "flux_contsub_4", "flux_11", "flux_contsub_11"]:
+for key in ["flux", "flux_troughsub", "flux_4", "flux_troughsub_4", "flux_11", "flux_troughsub_11"]:
 	bogus_tab[key] = bogus_tab[key] / fiber_area
 
-MASK_CONTINUUM_FIBERS = False
-print("mask continuum fibers: ", MASK_CONTINUUM_FIBERS)
+MASK_CONTINUUM_FIBERS = (args.mask_continuum == 'True')
+logging.info("mask continuum fibers: {}".format( MASK_CONTINUUM_FIBERS))
 if MASK_CONTINUUM_FIBERS:
 	for mask_name in long_lae_masks.keys():
 		long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[bogus_tab["mask_7"]]
 	bogus_tab = bogus_tab[bogus_tab["mask_7"]]
+NEW_FLAG = False
+logging.info("\nmasking with Karl's new flagging method: {}".format( NEW_FLAG))
+if NEW_FLAG:
+	for mask_name in long_lae_masks.keys():
+		long_lae_masks[mask_name] = np.array(long_lae_masks[mask_name])[long_tab["new_mask_5"]]
+	long_tab = long_tab[long_tab["new_mask_5"]]
 
 
-EXTENSION = "flux_contsub"
+
+EXTENSION = "flux_troughsub"
+logging.info(f'Extension: {EXTENSION}')
 
 for mask_name in long_lae_masks.keys():
 	mask = long_lae_masks[mask_name]
 	total_randoms = bogus_tab[EXTENSION][mask]
 	N = len(total_randoms)
-	bogus_dict["median_contsub_"+mask_name] = [np.nanmedian(total_randoms)]
-	bogus_dict["err_median_contsub_perc_upper_"+mask_name] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
-	bogus_dict["err_median_contsub_perc_upper_"+mask_name] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
-	bogus_dict["err_median_contsub_"+mask_name] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+	bogus_dict["median_troughsub_"+mask_name] = [np.nanmedian(total_randoms)]
+	bogus_dict["perc_lower_median_troughsub_"+mask_name] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+	bogus_dict["perc_upper_median_troughsub_"+mask_name] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+	bogus_dict["err_median_troughsub_"+mask_name] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
 
 total_randoms = bogus_tab["flux"]
 N = len(total_randoms)
-bogus_dict["median_no_contsub_all"] = [np.nanmedian(total_randoms)]
-bogus_dict["err_median_no_contsub_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
-bogus_dict["err_median_no_contsub_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
-bogus_dict["err_median_no_contsub_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+bogus_dict["median_no_troughsub_all"] = [np.nanmedian(total_randoms)]
+bogus_dict["err_median_no_troughsub_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+bogus_dict["err_median_no_troughsub_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+bogus_dict["err_median_no_troughsub_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 
-total_randoms = bogus_tab["flux_contsub"]
+total_randoms = bogus_tab["flux_troughsub"]
 N = len(total_randoms)
-bogus_dict["mean_contsub_all"] = [np.nanmean(total_randoms)]
-bogus_dict["err_mean_contsub_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
-bogus_dict["err_mean_contsub_perc_lower_all"] = [abs(np.nanmean(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
-bogus_dict["err_mean_contsub_perc_upper_all"] = [abs(np.nanmean(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+bogus_dict["mean_troughsub_all"] = [np.nanmean(total_randoms)]
+bogus_dict["err_mean_troughsub_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+bogus_dict["err_mean_troughsub_perc_lower_all"] = [abs(np.nanmean(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+bogus_dict["err_mean_troughsub_perc_upper_all"] = [abs(np.nanmean(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 
-total_randoms = bogus_tab["flux_contsub"]
+total_randoms = bogus_tab["flux_troughsub"]
 N = len(total_randoms)
-bogus_dict["biweight_contsub_all"] = [biweight_location(total_randoms, ignore_nan=True)]
-bogus_dict["err_biweight_contsub_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
-bogus_dict["err_biweight_contsub_perc_lower_all"] = [abs(biweight_location(total_randoms, ignore_nan=True)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
-bogus_dict["err_biweight_contsub_perc_upper_all"] = [abs(biweight_location(total_randoms, ignore_nan=True)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+bogus_dict["biweight_troughsub_all"] = [biweight_location(total_randoms, ignore_nan=True)]
+bogus_dict["err_biweight_troughsub_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+bogus_dict["err_biweight_troughsub_perc_lower_all"] = [abs(biweight_location(total_randoms, ignore_nan=True)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+bogus_dict["err_biweight_troughsub_perc_upper_all"] = [abs(biweight_location(total_randoms, ignore_nan=True)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 
-total_randoms = bogus_tab["flux_contsub_4"]
+total_randoms = bogus_tab["flux_troughsub_4"]
 N = len(total_randoms)
-bogus_dict["median_contsub_4_all"] = [np.nanmedian(total_randoms)]
-bogus_dict["err_median_contsub_4_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
-bogus_dict["err_median_contsub_4_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
-bogus_dict["err_median_contsub_4_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+bogus_dict["median_troughsub_4_all"] = [np.nanmedian(total_randoms)]
+bogus_dict["err_median_troughsub_4_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+bogus_dict["err_median_troughsub_4_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+bogus_dict["err_median_troughsub_4_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 
-total_randoms = bogus_tab["flux_contsub_11"]
+total_randoms = bogus_tab["flux_troughsub_11"]
 N = len(total_randoms)
-bogus_dict["median_contsub_11_all"] = [np.nanmedian(total_randoms)]
-bogus_dict["err_median_contsub_11_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
-bogus_dict["err_median_contsub_11_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
-bogus_dict["err_median_contsub_11d_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+bogus_dict["median_troughsub_11_all"] = [np.nanmedian(total_randoms)]
+bogus_dict["err_median_troughsub_11_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+bogus_dict["err_median_troughsub_11_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+bogus_dict["err_median_troughsub_11d_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 
-ascii.write(bogus_dict, "random_sky_values_multimasks_sn_65_unmasked.tab")
-print("Wrote to random_sky_values_multimasks.tab")
+savefile = os.path.join(final_dir, "random_sky_values_multimasks{}.tab".format(DIR_APX))
+ascii.write(bogus_dict, savefile)
+logging.info("Wrote to {}".format(savefile))

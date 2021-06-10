@@ -25,7 +25,8 @@ parser.add_argument("-l","--local", type=str, default="False",
 parser.add_argument("-nf", "--newflag", type=str, default="True",
 		help="Use Karl's new flagging method.")
 parser.add_argument("-sr", "--subtract_residual", type=str, default="False", help="Subtract average spectrum after masking continuum fibers.")
-parser.add_argument("-bc", "--background_correction", type=str, default="True", help="Add wavelength-dependent background correction.")
+parser.add_argument("-bc", "--background_correction", type=str, default="False", help="Add wavelength-dependent background correction.")
+parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -73,6 +74,19 @@ elif args.background_correction == "False":
 else:
 	print("Could not identify a valid argument for background_correction: True or False.")
 
+if args.farout == "True":
+	FAR_OUT = True
+	DIR_APX = DIR_APX + "_100"
+	print("Going out to 100''.")
+elif args.farout == "False":
+	FAR_OUT = False
+	print("Going out to 20''.")
+else:
+	print("Could not identify a valid argument for farout: True or False.")
+print("Final directory appendix: "+DIR_APX)
+
+
+
 print("Final directory appendix: "+DIR_APX)
 
 
@@ -95,7 +109,10 @@ def save_lae(detectid):
 
 		lae_coords = SkyCoord(ra = lae_ra*u.deg, dec = lae_dec*u.deg)
 		rs = lae_coords.separation(shot_coords)
-		mask = rs <= 50*u.arcsec
+		if FAR_OUT:
+			mask = rs <= 100*u.arcsec
+		else:
+			mask = rs <= 20*u.arcsec
 		rs = rs[mask]
 		spec_here = ffskysub[mask]
 		err_here = spec_err[mask]
@@ -148,25 +165,34 @@ def save_lae(detectid):
 			fibers_here = rs > 2.0 * u.arcsec
 			new_masks = []
 			for wl_mask in [wlhere_low, wlhere_high]:
-				new_mask_tmp = np.ones(len(spec_here), dtype=int)
+				try:
+					new_mask_tmp = np.ones(len(spec_here), dtype=int)
 
-				averages = biweight_location(spec_here[:,wl_mask], axis=1, ignore_nan = True)
-				av_average = biweight_location(averages[fibers_here], ignore_nan=True)
-				av_std = biweight_scale(averages[fibers_here], ignore_nan=True)
-				outliers = abs(averages - av_average) > 3*av_std
-				new_mask_tmp[outliers] = 0
-				print("{:.1f}% unmasked after first step for LAE {}.".format(100*sum(new_mask_tmp)/len(new_mask_tmp), detectid))
-				
-				new_mask_dict = {}
-				for cutoff in [0, 5, 10]:
-					new_mask_dict[cutoff] = np.ones(len(spec_here), dtype=int)
-					new_mask_dict[cutoff][new_mask_tmp == 0] = 0
-					perc = np.nanpercentile(averages[fibers_here * new_mask_tmp], 100-cutoff)
-					print(cutoff, perc)
-					highest = averages > perc
-					new_mask_dict[cutoff][highest] = 0
-				
-				new_masks.append(new_mask_dict)
+					averages = biweight_location(spec_here[:,wl_mask], axis=1, ignore_nan = True)
+					av_average = biweight_location(averages[fibers_here], ignore_nan=True)
+					av_std = biweight_scale(averages[fibers_here], ignore_nan=True)
+					outliers = abs(averages - av_average) > 3*av_std
+					new_mask_tmp[outliers] = 0
+					print("{:.1f}% unmasked after first step for LAE {}.".format(100*sum(new_mask_tmp)/len(new_mask_tmp), detectid))
+					
+					new_mask_dict = {}
+					for cutoff in [0, 5, 10]:
+						new_mask_dict[cutoff] = np.ones(len(spec_here), dtype=int)
+						new_mask_dict[cutoff][new_mask_tmp == 0] = 0
+						perc = np.nanpercentile(averages[fibers_here * new_mask_tmp], 100-cutoff)
+						print(cutoff, perc)
+						highest = averages > perc
+						new_mask_dict[cutoff][highest] = 0
+					new_mask_dict[0] = np.ones(len(spec_here), dtype=int)
+					new_mask_dict[0][new_mask_tmp == 0] = 0
+					
+					new_masks.append(new_mask_dict)
+				except Exception as e:
+					print("An error occurred, adding False flags.")
+					print(e)
+					new_mask_tmp = np.zeros(len(spec_here), dtype=int)
+					new_mask_dict = {0: new_mask_tmp, 5: new_mask_tmp, 10: new_mask_tmp}
+					new_masks.append(new_mask_dict)
 			new_mask = {}
 			for cutoff in new_masks[0].keys():
 				new_mask[cutoff] = new_masks[0][cutoff] * new_masks[1][cutoff]
@@ -285,8 +311,15 @@ order = np.argsort(complete_lae_tab["shotid"])
 complete_lae_tab = complete_lae_tab[order]
 
 # include only high-S/N LAEs and exclude LAEs in large-residual areas.
-complete_lae_tab = complete_lae_tab[complete_lae_tab["sn"]>6.5]
+complete_lae_tab = complete_lae_tab[complete_lae_tab["sn"]<=6.5]
 #complete_lae_tab = complete_lae_tab[complete_lae_tab["wave"] - 1.5*complete_lae_tab["linewidth"] >3750]
+
+path = os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}")
+if not os.path.exists(path):
+	os.mkdir(path)
+	print("Creating path", path)
+else:
+	print("Path already exists", path)
 
 
 def_wave = np.arange(3470, 5542, 2.)
@@ -305,7 +338,7 @@ for shotid in np.unique(complete_lae_tab["shotid"])[::-1]:
 		continue
 	done = True 
 	for detectid in laes_here["detectid"].data:
-		done *= os.path.exists(os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}/bogus_4_{detectid}.dat"))
+		done *= os.path.exists(os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}/bogus_1_{detectid}.dat"))
 
 	if done:
 		print("Already finished", shotid)

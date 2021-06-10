@@ -4,16 +4,32 @@ import glob
 import numpy as np
 from astropy.io import ascii
 from astropy.stats import biweight_location, biweight_scale
+import argparse
+import os
+import sys
+import logging
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-s', '--final_dir', type=str, default=".", help='Directory to save radial profiles. This is necessary to add.')
+args = parser.parse_args(sys.argv[1:])
+
+fmtstr = " Name: %(user_name)s : %(asctime)s: (%(filename)s): %(levelname)s: %(funcName)s Line: %(lineno)d - %(message)s"
+datestr = "%m/%d/%Y %I:%M:%S %p "
+#basic logging config
+logging.basicConfig(
+        filename=os.path.join(args.final_dir, "get_lutz_errors.log"),
+        level=logging.DEBUG,
+        filemode="w",
+        datefmt=datestr,
+)
+
+logging.info('Final directory: {}'.format(args.final_dir))
 
 lutz_errors = {}
 stack_lists = {}
 # proper stacks
 
-SN_65 = True
-if SN_65:
-	ff = glob.glob("radial_profiles_empty_wlshift/*_proper_multimask_sn_65_*_unmasked.tab")
-else:
-	ff =  glob.glob("radial_profiles_empty_wlshift/*_proper_multimask_[!s]*.tab")
+ff = glob.glob(os.path.join(args.final_dir, "radial_profiles_empty_wlshift/radial_profiles_proper_multimask*.tab"))
 tmp = ascii.read(ff[0])
 
 for key in tmp.keys():
@@ -35,14 +51,10 @@ for fin in ff:
 
 	for key in stack_lists.keys():
 		stack_lists[key].append(tmp[key])
-print("number of files used: ", i)
+logging.info("number of files used: {}".format( i))
 for key in stack_lists.keys():
 	lutz_errors[key] = np.nanstd(stack_lists[key], axis=0)
 
-if SN_65:
-	filename = "stack_errors_empirical_muse_multimask_sn_65_unmasked.tab"
-	ascii.write(lutz_errors, filename)
-	print("Wrote to ", filename)
-else:
-	ascii.write(lutz_errors, "stack_errors_empirical_muse_multimask.tab")
-	print("Wrote errors to stack_errors_empirical_muse_multimask.tab")
+filename = os.path.join(args.final_dir, 'stack_errors_empirical_muse_multimask.tab')
+ascii.write(lutz_errors, filename)
+logging.info("Wrote errors to {}".format(filename))
