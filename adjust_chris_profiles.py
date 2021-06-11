@@ -49,45 +49,47 @@ def get_convolved_profile_chris(fwhm):
 																				
 	return result_dict  
 
-fn = "../karls_suggestion/"+"SBr_NIEMEYER_z3_veryextended.hdf5" # change filename to hdf5 I sent you
+fn = "../karls_suggestion/chris_profiles/"+"SBr_NIEMEYER_z3_veryextended.hdf5" # change filename to hdf5 I sent you
 
    
 rbins = np.arange(0.5, 400.5, 1) # radial central bins in pkpc
 
+for FWHM in [1.62, 1.36, 1.8]:
+	for log_min, log_max in [(9.5, 10), (10, 10.5), (10.5, 11)]:
+		sm_min = 10**log_min
+		sm_max = 10**log_max
 
-for log_min, log_max in [(9.5, 10), (10, 10.5), (10.5, 11)]:
-	sm_min = 10**log_min
-	sm_max = 10**log_max
+		stack_dict = {}
+		with h5py.File(fn,"r") as hf:
 
-	stack_dict = {}
-	with h5py.File(fn,"r") as hf:
+			sm = hf["StellarMass30kpc"][:]
+			bg = hf["background"].value
 
-		sm = hf["StellarMass30kpc"][:]
-		bg = hf["background"].value
+			mask = (sm>=sm_min) & (sm<sm_max) # in this example, let's restrict the stellar mass range we are interested in.
+			for key in hf.keys():
+				if key in ["r", "background", "StellarMass30kpc"]:
+					continue
+				tmp = hf[key][:]
+				stack_dict[key] = np.nanmedian(tmp[:,mask], axis=1)
+			
+			print(hf.keys())
 
-		mask = (sm>=sm_min) & (sm<sm_max) # in this example, let's restrict the stellar mass range we are interested in.
-		for key in hf.keys():
-			if key in ["r", "background", "StellarMass30kpc"]:
-				continue
-			tmp = hf[key][:]
-			stack_dict[key] = np.nanmedian(tmp[:,mask], axis=1)
+		convolved_dict = {}
+		N = len(stack_dict.keys())
+		i = 1
+		for key in stack_dict.keys():
+			stack = stack_dict[key]
+			name = key
 		
-		print(hf.keys())
-
-	convolved_dict = {}
-	N = len(stack_dict.keys())
-	i = 1
-	for key in stack_dict.keys():
-		stack = stack_dict[key]
-		name = key
-	
-		chris_profile_func = interp1d(rbins, stack, bounds_error=False, fill_value=(stack[0], np.nan))
-		result_dict = get_convolved_profile_chris(1.3)
-		
-		convolved_dict["r"] = result_dict["r"]
-		convolved_dict[name] = result_dict["profile_fiber"]
-		print(f"Finished {i}/{N}.")
-		i += 1
-		
-	ascii.write(convolved_dict, "../karls_suggestion/chris_profiles/chris_profiles_extended_individual_{}_{}.tab".format(log_min, log_max))
-	print("Finished mass range", log_min, log_max)
+			chris_profile_func = interp1d(rbins, stack, bounds_error=False, fill_value=(stack[0], np.nan))
+			#result_dict = get_convolved_profile_chris(1.3)
+			result_dict = get_convolved_profile_chris(1.3)
+			
+			convolved_dict["r"] = result_dict["r"]
+			convolved_dict[name] = result_dict["profile_fiber"]
+			print(f"Finished {i}/{N}.")
+			i += 1
+			
+		#ascii.write(convolved_dict, "../karls_suggestion/chris_profiles/chris_profiles_extended_individual_{}_{}.tab".format(log_min, log_max))
+		ascii.write(convolved_dict, "../gama09/chris_profiles/chris_profiles_extended_individual_{}_{}_{}.tab".format(FWHM, log_min, log_max))
+		print("Finished mass range", log_min, log_max)
