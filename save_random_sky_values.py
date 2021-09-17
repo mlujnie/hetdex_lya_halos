@@ -213,7 +213,6 @@ for source_idx in range(len(sources)):
 				logging.info(f"Finished {i}/{N}")
 		except Exception as e:
 			logging.error(e)
-			break
 			logging.error("Failed to read "+lae_file)
 
 bogus_tab = vstack(bogus_list)

@@ -6,6 +6,10 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.stats import biweight_scale, biweight_location
 
+from astropy.cosmology import FlatLambdaCDM
+# set up cosmology
+cosmo = FlatLambdaCDM(H0=67.37, Om0=0.3147)
+
 from hetdex_api.shot import *
 
 from astropy.io import ascii
@@ -28,6 +32,7 @@ parser.add_argument("-nf", "--newflag", type=str, default="True",
 parser.add_argument("-sr", "--subtract_residual", type=str, default="False", help="Subtract average spectrum after masking continuum fibers.")
 parser.add_argument("-bc", "--background_correction", type=str, default="False", help="Add wavelength-dependent background correction.")
 parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
+parser.add_argument("-na", "--new_agns", type=str, default = "False", help='Save the 52 new AGNs.')
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -78,9 +83,21 @@ else:
 if args.farout == "True":
 	FAR_OUT = True
 	DIR_APX = DIR_APX + "_100"
+
+	r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
+	r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320, 800])
+	r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
+	r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
+
 	print("Going out to 100''.")
 elif args.farout == "False":
 	FAR_OUT = False
+
+	r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160])
+	r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
+	r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
+	r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
+
 	print("Going out to 20''.")
 else:
 	print("Could not identify a valid argument for farout: True or False.")
@@ -115,6 +132,7 @@ def save_lae(detectid):
 	lae_dec = shot_tab["dec"][mask]
 	order = np.argsort(rs)
 	rs = rs[order]
+	rs_kpc = (rs * cosmo.kpc_proper_per_arcmin(lae_redshift)).to(u.kpc)
 	spec_here = spec_here[order]
 	err_here = err_here[order]
 	mask_7_here = mask_7_here[order]
@@ -122,7 +140,8 @@ def save_lae(detectid):
 	lae_ra = lae_ra[order]
 	lae_dec = lae_dec[order]
 
-	MEDFILT_CONTSUB = True
+	MEDFILT_CONTSUB = False #True
+	NO_CONTSUB = True
 
 	if MEDFILT_CONTSUB:
 		continuum = np.zeros(spec_here.shape)
@@ -139,6 +158,11 @@ def save_lae(detectid):
 		continuum_subtracted = spec_here.copy() - continuum
 		continuum_subtracted_error = np.sqrt(err_here**2 + continuum_error**2)
 		continuum_subtracted[continuum_subtracted==0.0] = np.nan
+	elif NO_CONTSUB:
+		continuum_subtracted = np.zeros(spec_here.shape)
+		continuum_subtracted_error = np.ones(spec_here.shape)
+		ones = np.ones(spec_here.shape)
+		ones[~np.isfinite(spec_here)] = np.nan
 	else:
 		continuum = []
 		for i in range(len(spec_here)):
@@ -200,35 +224,26 @@ def save_lae(detectid):
 
 	# save core spectrum and halo spectra
 	rest_wavelength = def_wave / (1 + lae_redshift)
-	core_spectrum = np.nanmedian(spec_here[mask_7_here & (rs <= 2*u.arcsec)], axis=0)
-	spectrum_2_5 = np.nanmedian(spec_here[mask_7_here & (rs > 2*u.arcsec) & (rs <= 5*u.arcsec)], axis=0)
-	spectrum_5_10 = np.nanmedian(spec_here[mask_7_here & (rs > 5*u.arcsec) & (rs <= 10*u.arcsec)], axis=0)
-	core_spectrum_uf = np.nanmedian(spec_here[(rs <= 2*u.arcsec)], axis=0)
-	spectrum_2_5_uf = np.nanmedian(spec_here[(rs > 2*u.arcsec) & (rs <= 5*u.arcsec)], axis=0)
-	spectrum_5_10_uf = np.nanmedian(spec_here[(rs > 5*u.arcsec) & (rs <= 10*u.arcsec)], axis=0)
-	spectrum_0_2_contsub = np.nanmedian(continuum_subtracted[(rs <= 2*u.arcsec)], axis=0)
-	spectrum_2_5_contsub = np.nanmedian(continuum_subtracted[(rs > 2*u.arcsec) & (rs <= 5*u.arcsec)], axis=0)
-	spectrum_5_10_contsub = np.nanmedian(continuum_subtracted[(rs > 5*u.arcsec) & (rs <= 10*u.arcsec)], axis=0)
-	spectrum_0_2_trough_contsub = np.nanmedian(trough_contsub[(rs <= 2*u.arcsec)], axis=0)
-	spectrum_2_5_trough_contsub = np.nanmedian(trough_contsub[(rs > 2*u.arcsec) & (rs <= 5*u.arcsec)], axis=0)
-	spectrum_5_10_trough_contsub = np.nanmedian(trough_contsub[(rs > 5*u.arcsec) & (rs <= 10*u.arcsec)], axis=0)
+	for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
 
-	save_tab = {"wave_rest": rest_wavelength,
+		core_spectrum = np.nanmedian(spec_here[mask_7_here & (rs_kpc > r_min*u.kpc) & (rs_kpc <= r_max*u.kpc)], axis=0)
+		core_spectrum_uf = np.nanmedian(spec_here[(rs_kpc > r_min*u.kpc) & (rs_kpc <= r_max*u.kpc)], axis=0)
+		core_spectrum_contsub = np.nanmedian(continuum_subtracted[(rs_kpc > r_min*u.kpc) & (rs_kpc <= r_max*u.kpc)], axis=0)
+		core_spectrum_trough_contsub = np.nanmedian(trough_contsub[(rs_kpc > r_min*u.kpc) & (rs_kpc <= r_max*u.kpc)], axis=0)
+
+		save_tab = {"wave_rest": rest_wavelength,
 			"central": spec_here[0], # central fiber
-			"spec_0_2": core_spectrum,
-			"spec_uf_0_2": core_spectrum_uf,
-			"spec_2_5": spectrum_2_5,
-			"spec_uf_2_5": spectrum_2_5_uf,
-			"spec_5_10": spectrum_5_10,
-			"spec_uf_5_10": spectrum_5_10_uf,
-			"spec_contsub_uf_0_2": spectrum_0_2_contsub,
-			"spec_contsub_uf_2_5": spectrum_2_5_contsub,
-			"spec_contsub_uf_5_10": spectrum_5_10_contsub,
-			"spec_troughsub_uf_0_2": spectrum_0_2_trough_contsub,
-			"spec_troughsub_uf_2_5": spectrum_2_5_trough_contsub,
-			"spec_troughsub_uf_5_10": spectrum_5_10_trough_contsub}
-	save_name = os.path.join(savedir, f"core_spectra_unflagged{DIR_APX}/lae_{detectid}.dat")
-	ascii.write(save_tab, save_name)
+			"spec": core_spectrum,
+			"spec_uf": core_spectrum_uf,
+			"spec_contsub_uf": core_spectrum_contsub,
+			"spec_troughsub_uf": core_spectrum_trough_contsub}
+
+		path = os.path.join(savedir, f"core_spectra_unflagged{DIR_APX}/{int(r_min)}_{int(r_max)}")
+		if not os.path.exists(path):
+			os.mkdir(path)
+			print("Creating path", path)
+		save_name = os.path.join(savedir, f"core_spectra_unflagged{DIR_APX}/{int(r_min)}_{int(r_max)}/lae_{detectid}.dat")
+		ascii.write(save_tab, save_name)
 
 	wlhere = abs(def_wave - lae_wave) <= 1.5 * lae_linewidth
 	wlhere_4 = abs(def_wave - lae_wave) <= 2 # integration window 4AA
@@ -324,6 +339,15 @@ def save_lae(detectid):
 			-10, -15, -20, -25, -30, -35, -40, -45, -50, -55, -60, -65, -70, -75, -80, -85, -90, -95, -100, -105]:
 		lae_wave = lae["wave"] + d_wl*2 # convert pixel to angstrom
 		lae_linewidth = lae["linewidth"]
+
+		# subtract the "continuum" within the absorption troughs (within 45AA of the line center, but not the inner 2xFWHM)
+		cont_wlhere = (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>2.5*lae_linewidth)
+		trough_continuum = np.nanmedian(spec_here[:,cont_wlhere], axis=1)
+		N = np.nansum(ones[:,cont_wlhere], axis=1)
+		trough_continuum_error = biweight_scale(spec_here[:,cont_wlhere], axis=1) / np.sqrt(N)
+		trough_contsub = (spec_here.T - trough_continuum).T
+		trough_contsub_error = np.sqrt(err_here.T**2 + trough_continuum_error**2).T
+
 		wlhere = abs(def_wave - lae_wave) <= 1.5 * lae_linewidth
 		wlhere_4 = abs(def_wave - lae_wave) <= 2 # integration window 4AA
 		wlhere_11 = abs(def_wave - lae_wave) <= 11/2. # integration window 11AA
@@ -416,11 +440,16 @@ def save_lae(detectid):
 
 	return 1
 
-   
 basedir = "/work2/05865/maja_n/stampede2/master"
 savedir = "/scratch/05865/maja_n"
-complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources.tab"))
-complete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]
+
+if args.new_agns == 'True':
+	print('Saving 52 new AGNs.')
+	complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "elixer_plots", "agn_unique_source_ids.txt"))
+else:	   
+	complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources.tab"))
+	complete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]
+
 order = np.argsort(complete_lae_tab["shotid"])
 complete_lae_tab = complete_lae_tab[order]
 
@@ -448,7 +477,7 @@ c = np.nanmin([np.ones(1036)*(1035-190), b-190], axis=0)
 filter_min = np.array(c, dtype=int)
 filter_max = np.array(b, dtype=int)
 
-for shotid in np.unique(complete_lae_tab["shotid"])[::-1]:
+for shotid in np.unique(complete_lae_tab["shotid"]):
 
 	#load the shot table and prepare full-frame sky subtracted spectra
 
@@ -517,7 +546,7 @@ for shotid in np.unique(complete_lae_tab["shotid"])[::-1]:
 		else:
 			xmid = 4800
 			ymid = 0.004
-			y0, y1 = 0.02, 0.0025
+			y0, y1 = 0.015, 0.0025
 		# add a wavelength-dependent background model to the data
 		background = np.where(def_wave < xmid, (def_wave-3500)*(ymid-y0)/(xmid-3500) + y0, (def_wave-xmid)*(y1-ymid)/(5500-xmid) + ymid)
 		ffskysub = ffskysub + background

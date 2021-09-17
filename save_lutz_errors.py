@@ -40,6 +40,7 @@ parser.add_argument('--mask_continuum', type=str, default='False', help='Mask co
 parser.add_argument('--sn_65', type=str, default='True', help='Use only sources with S/N>6.5: True or False.')
 parser.add_argument('--sfg', type=str, default='True', help='Use SFG sample: True or False. If False, use AGN sample.')
 parser.add_argument('--intwidth', type=str, default='', help='Appendix for the fixed integration width: nothing, _4, or _11.')
+parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
 args = parser.parse_args(sys.argv[1:])
 
 fmtstr = " Name: %(user_name)s : %(asctime)s: (%(filename)s): %(levelname)s: %(funcName)s Line: %(lineno)d - %(message)s"
@@ -54,6 +55,28 @@ logging.basicConfig(
 
 
 DIR_APX = args.dir_apx
+if args.farout == "True":
+	FAR_OUT = True
+	#DIR_APX = DIR_APX + "_100"
+
+	r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
+	r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320, 800])
+	r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
+	r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
+
+	print("Going out to 100''.")
+elif args.farout == "False":
+	FAR_OUT = False
+
+	r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160])
+	r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
+	r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
+	r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
+
+	print("Going out to 20''.")
+else:
+	print("Could not identify a valid argument for farout: True or False.")
+
 logging.info("Directory appendix: "+ DIR_APX)
 
 def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
@@ -249,11 +272,10 @@ lae_masks = {
 # getting the stacks
 kpc_per_arcsec_mid = cosmo.kpc_proper_per_arcmin(2.5)/60*u.arcmin/u.kpc
 
-r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160])
-r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
-
-r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
-r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
+#r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160])
+#r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
+#r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
+#r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
 
 r_bins = r_bins_kpc / kpc_per_arcsec_mid
 r_bins_max = r_bins_max_kpc / kpc_per_arcsec_mid
@@ -330,10 +352,10 @@ for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
 	# getting the stacks
 	kpc_per_arcsec_mid = cosmo.kpc_proper_per_arcmin(2.5)/60*u.arcmin/u.kpc
 
-	r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160])
-	r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
-	r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
-	r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
+	#r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160])
+	#r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
+	#r_bins_plot_kpc = np.nanmean([r_bins_kpc, r_bins_max_kpc], axis=0)
+	#r_bins_kpc_xbars = (r_bins_max_kpc-r_bins_kpc)/2.
 
 	r_bins = r_bins_kpc / kpc_per_arcsec_mid
 	r_bins_max = r_bins_max_kpc / kpc_per_arcsec_mid

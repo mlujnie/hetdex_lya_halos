@@ -86,10 +86,6 @@ else:
 print("Final directory appendix: "+DIR_APX)
 
 
-
-print("Final directory appendix: "+DIR_APX)
-
-
 def load_shot(shot):
         fileh = open_shot_file(shot)
         table = Table(fileh.root.Data.Fibers.read())
@@ -129,7 +125,8 @@ def save_lae(detectid):
 		lae_ra = lae_ra[order]
 		lae_dec = lae_dec[order]
 
-		MEDFILT_CONTSUB = True
+		MEDFILT_CONTSUB = False
+		NO_CONTSUB = True
 
 		if MEDFILT_CONTSUB:
 			continuum = np.zeros(spec_here.shape)
@@ -146,6 +143,11 @@ def save_lae(detectid):
 			continuum_subtracted = spec_here.copy() - continuum
 			continuum_subtracted_error = np.sqrt(err_here**2 + continuum_error**2)
 			continuum_subtracted[continuum_subtracted==0.0] = np.nan
+		elif NO_CONTSUB:
+			continuum_subtracted = np.zeros(spec_here.shape)
+			continuum_subtracted_error = np.ones(spec_here.shape)
+			ones = np.ones(spec_here.shape)
+			ones[~np.isfinite(spec_here)] = np.nan
 		else:
 			continuum = []
 			for i in range(len(spec_here)):
@@ -303,15 +305,15 @@ def save_lae(detectid):
 		print("Wrote to "+save_file)
 	return 1
 
-savedir = "/scratch/05865/maja_n"
 basedir = "/work2/05865/maja_n/stampede2/master"
+savedir = "/scratch/05865/maja_n"
 complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources.tab"))
 complete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]
 order = np.argsort(complete_lae_tab["shotid"])
 complete_lae_tab = complete_lae_tab[order]
 
 # include only high-S/N LAEs and exclude LAEs in large-residual areas.
-complete_lae_tab = complete_lae_tab[complete_lae_tab["sn"]<=6.5]
+#complete_lae_tab = complete_lae_tab[complete_lae_tab["sn"]>6.5]
 #complete_lae_tab = complete_lae_tab[complete_lae_tab["wave"] - 1.5*complete_lae_tab["linewidth"] >3750]
 
 path = os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}")
@@ -399,7 +401,7 @@ for shotid in np.unique(complete_lae_tab["shotid"])[::-1]:
 		else:
 			xmid = 4800
 			ymid = 0.004
-			y0, y1 = 0.02, 0.0025
+			y0, y1 = 0.015, 0.0025
 		# add a wavelength-dependent background model to the data
 		background = np.where(def_wave < xmid, (def_wave-3500)*(ymid-y0)/(xmid-3500) + y0, (def_wave-xmid)*(y1-ymid)/(5500-xmid) + ymid)
 		ffskysub = ffskysub + background
