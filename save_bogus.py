@@ -307,7 +307,7 @@ def save_lae(detectid):
 
 basedir = "/work2/05865/maja_n/stampede2/master"
 savedir = "/scratch/05865/maja_n"
-complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources.tab"))
+complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources_combined.tab"))
 complete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]
 order = np.argsort(complete_lae_tab["shotid"])
 complete_lae_tab = complete_lae_tab[order]

@@ -41,7 +41,7 @@ parser.add_argument("-d", "--dir_apx", type=str, default="_newflag",
 parser.add_argument('-s', '--final_dir', type=str, default=".", help='Directory to save radial profiles. This is necessary to add.')
 parser.add_argument('--mask_continuum', type=str, default='False', help='Mask continuum fibers: True or False.')
 parser.add_argument('--sn_65', type=str, default='True', help='Use only sources with S/N>6.5: True or False.')
-parser.add_argument('--sfg', type=str, default='True', help='Use SFG sample: True or False. If False, use AGN sample.')
+parser.add_argument('--sample', type=int, default=3, help='Which sample to use? 1: broad lines. 2: narrow lines, high L. 3: narrow lines, low L.')
 parser.add_argument('--intwidth', type=str, default='', help='Appendix for the fixed integration width: nothing, _4, or _11.')
 parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
 args = parser.parse_args(sys.argv[1:])
@@ -160,7 +160,7 @@ def get_stack_proper(r_bins_min, r_bins_max, data_r, data_flux, data_redshift, k
 	return r_bins_mid, np.array(stack)/fiberarea, np.array(e_stack)/fiberarea
 
 # read in data
-sources = ascii.read("../karls_suggestion/high_sn_sources.tab")
+sources = ascii.read("../karls_suggestion/high_sn_sources_combined.tab")
 sources = sources[sources["mask"]==1]
 
 # get the luminosity
@@ -183,19 +183,34 @@ else:
 
 narrow_lines = sources["linewidth_km/s"] < 1000/2.35
 low_luminosity = sources["luminosity"] < 10**43
-low_continuum = sources["gmag"] > 24
-sfg_sample = narrow_lines & low_luminosity & low_continuum
-agn_sample = ~sfg_sample
 
-SFG_SAMPLE = (args.sfg == 'True')
-AGN_SAMPLE = ~SFG_SAMPLE
+broad_line_sample = ~narrow_lines
+logging.info('1. The broad line sample contains {} sources.'.format(len(broad_line_sample[broad_line_sample])))
 
-if SFG_SAMPLE:
-	logging.info('Using SFG sample.')
-	sources = sources[total_mask * sfg_sample]
+narrow_line_high_L_sample = narrow_lines * (~low_luminosity)
+logging.info('2. The narrow line, high L sample contains {} sources.'.format(len(narrow_line_high_L_sample[narrow_line_high_L_sample])))
+
+narrow_line_low_L_sample = narrow_lines * low_luminosity
+logging.info('3. The narrow line, low L sample contains {} sources.'.format(len(narrow_line_low_L_sample[narrow_line_low_L_sample])))
+
+sample = int(args.sample)
+print('args.sample: ', sample, type(sample))
+SAMPLE_1 = sample == 1
+SAMPLE_2 = sample == 2
+SAMPLE_3 = sample == 3
+if (not SAMPLE_1) * (not SAMPLE_2) * (not SAMPLE_3):
+	logging.error('The --sample option must have a 1, 2, or 3. Cancelling this script.')
+	sys.exit()
+
+if SAMPLE_1:
+	logging.info('Using broad line sample.')
+	sources = sources[total_mask * broad_line_sample]
+elif SAMPLE_2:
+	logging.info('Using narrow line, high L sample.')
+	sources = sources[total_mask * narrow_line_high_L_sample]
 else:
-	logging.info('Using AGN-dominated sample.')
-	sources = sources[total_mask * agn_sample]
+	logging.info('Using narrow line, low L sample.')
+	sources = sources[total_mask * narrow_line_low_L_sample]
 	
 logging.info("len(sources) = {}".format( len(sources)))
 

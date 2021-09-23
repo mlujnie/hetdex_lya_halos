@@ -39,8 +39,9 @@ parser.add_argument("-d", "--dir_apx", type=str, default="_newflag",
 parser.add_argument('-s', '--final_dir', type=str, default=".", help='Directory to save radial profiles. This is necessary to add.')
 parser.add_argument('--mask_continuum', type=str, default='False', help='Mask continuum fibers: True or False.')
 parser.add_argument('--sn_65', type=str, default='True', help='Use only sources with S/N>6.5: True or False.')
-parser.add_argument('--sfg', type=str, default='True', help='Use SFG sample: True or False. If False, use AGN sample.')
+parser.add_argument('--sample', type=int, default=3, help='Which sample to use? 1: broad lines. 2: narrow lines, high L. 3: narrow lines, low L.')
 parser.add_argument('--intwidth', type=str, default='', help='Appendix for the fixed integration width: nothing, _4, or _11.')
+parser.add_argument('-b', '--bootstrap', type=int, default=200, help='Number of bootstrapping samples.')
 args = parser.parse_args(sys.argv[1:])
 
 fmtstr = " Name: %(user_name)s : %(asctime)s: (%(filename)s): %(levelname)s: %(funcName)s Line: %(lineno)d - %(message)s"
@@ -127,7 +128,7 @@ def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
 	return M.squeeze() + (d * u).sum(axis=axis) / u.sum(axis=axis)
 
 # read in data
-sources = ascii.read("../karls_suggestion/high_sn_sources.tab")
+sources = ascii.read("../karls_suggestion/high_sn_sources_combined.tab")
 sources = sources[sources["mask"]==1]
 
 # get the luminosity
@@ -150,19 +151,34 @@ else:
 
 narrow_lines = sources["linewidth_km/s"] < 1000/2.35
 low_luminosity = sources["luminosity"] < 10**43
-low_continuum = sources["gmag"] > 24
-sfg_sample = narrow_lines & low_luminosity & low_continuum
-agn_sample = ~sfg_sample
 
-SFG_SAMPLE = (args.sfg == 'True')
-AGN_SAMPLE = ~SFG_SAMPLE
+broad_line_sample = ~narrow_lines
+logging.info('1. The broad line sample contains {} sources.'.format(len(broad_line_sample[broad_line_sample])))
 
-if SFG_SAMPLE:
-	logging.info('Using SFG sample.')
-	sources = sources[total_mask * sfg_sample]
+narrow_line_high_L_sample = narrow_lines * (~low_luminosity)
+logging.info('2. The narrow line, high L sample contains {} sources.'.format(len(narrow_line_high_L_sample[narrow_line_high_L_sample])))
+
+narrow_line_low_L_sample = narrow_lines * low_luminosity
+logging.info('3. The narrow line, low L sample contains {} sources.'.format(len(narrow_line_low_L_sample[narrow_line_low_L_sample])))
+
+sample = int(args.sample)
+print('args.sample: ', sample, type(sample))
+SAMPLE_1 = sample == 1
+SAMPLE_2 = sample == 2
+SAMPLE_3 = sample == 3
+if (not SAMPLE_1) * (not SAMPLE_2) * (not SAMPLE_3):
+	logging.error('The --sample option must have a 1, 2, or 3. Cancelling this script.')
+	sys.exit()
+
+if SAMPLE_1:
+	logging.info('Using broad line sample.')
+	sources = sources[total_mask * broad_line_sample]
+elif SAMPLE_2:
+	logging.info('Using narrow line, high L sample.')
+	sources = sources[total_mask * narrow_line_high_L_sample]
 else:
-	logging.info('Using AGN-dominated sample.')
-	sources = sources[total_mask * agn_sample]
+	logging.info('Using narrow line, low L sample.')
+	sources = sources[total_mask * narrow_line_low_L_sample]
 	
 logging.info("len(sources) = {}".format( len(sources)))
 
@@ -288,6 +304,24 @@ bogus_dict["median_troughsub_11_all"] = [np.nanmedian(total_randoms)]
 bogus_dict["err_median_troughsub_11_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
 bogus_dict["err_median_troughsub_11_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
 bogus_dict["err_median_troughsub_11d_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+
+############ bootstrapping to get the standard error of the median ############################################################################
+total_randoms = bogus_tab['flux_troughsub']
+total_randoms = total_randoms[np.isfinite(total_randoms)]
+B = args.bootstrap
+N = len(total_randoms)
+logging.info('Starting bootstrapping with B={} and N={}.'.format(B, N))
+sample_medians = []
+for i in range(B):
+	new_sample = random.choices(total_randoms, k=N) # Return a k sized list of elements chosen from the population with replacement.
+	sample_medians.append(np.nanmedian(new_sample))
+	logging.info('Finished {}.'.format(i))
+mean_of_medians = np.nanmean(sample_medians)
+std_of_medians = np.nanstd(sample_medians)
+
+bogus_dict['mean_of_medians_troughsub_all'] = [mean_of_medians]
+bogus_dict['std_of_medians_troughsub_all'] = [std_of_medians]
+
 
 savefile = os.path.join(final_dir, "random_sky_values_multimasks{}.tab".format(DIR_APX))
 ascii.write(bogus_dict, savefile)
