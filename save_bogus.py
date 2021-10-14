@@ -27,6 +27,7 @@ parser.add_argument("-nf", "--newflag", type=str, default="True",
 parser.add_argument("-sr", "--subtract_residual", type=str, default="False", help="Subtract average spectrum after masking continuum fibers.")
 parser.add_argument("-bc", "--background_correction", type=str, default="False", help="Add wavelength-dependent background correction.")
 parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
+parser.add_argument("--samelambda", type=str, default='False', help='Use the Lya wavelength as the central wavelength and make sure that the fiber is further away than 2.')
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -83,6 +84,17 @@ elif args.farout == "False":
 	print("Going out to 20''.")
 else:
 	print("Could not identify a valid argument for farout: True or False.")
+
+if args.samelambda == 'True':
+	SAMELAMBDA = True
+	DIR_APX = DIR_APX + '_samelambda'
+	print('Using the Lya wavelength.')
+elif args.samelambda == 'False':
+	SAMELAMBDA = False
+	print('Using Lya wavelenth plus random offset within 50AA.')
+else:
+	print("Could not identify a valid argument for samelambda: True or False.")
+
 print("Final directory appendix: "+DIR_APX)
 
 
@@ -94,16 +106,30 @@ def load_shot(shot):
  
 def save_lae(detectid):
 	lae = complete_lae_tab[complete_lae_tab["detectid"]==detectid]
+	real_lae_coords = SkyCoord(ra=lae['ra']*u.deg, dec=lae['dec']*u.deg)
 	
 	for iternum in range(3):
-		randnum = random.randint(0, len(shot_tab)-1)
-		d_ra = random.uniform(-1, 1)/3600.
-		d_dec = random.uniform(-1, 1)/3600.
-		d_wave = random.uniform(-50, 50)
+		
+		lae_separation = 0*u.arcmin
+		if SAMELAMBDA:
+			MIN_SEP = 2*u.arcmin
+		else:
+			MIN_SEP = 0*u.arcmin
+		while lae_separation <= MIN_SEP:
+			randnum = random.randint(0, len(shot_tab)-1)
+			d_ra = random.uniform(-1, 1)/3600.
+			d_dec = random.uniform(-1, 1)/3600.
 
-		lae_ra, lae_dec = shot_tab["ra"][randnum]+d_ra, shot_tab["dec"][randnum]+d_dec
+			lae_ra, lae_dec = shot_tab["ra"][randnum]+d_ra, shot_tab["dec"][randnum]+d_dec
+			lae_coords = SkyCoord(ra = lae_ra*u.deg, dec = lae_dec*u.deg)
+			lae_separation = real_lae_coords.separation(lae_coords)
+		
+		if SAMELAMBDA:
+			d_wave = 0
+		else:
+			d_wave = random.uniform(-50, 50)
 
-		lae_coords = SkyCoord(ra = lae_ra*u.deg, dec = lae_dec*u.deg)
+
 		rs = lae_coords.separation(shot_coords)
 		if FAR_OUT:
 			mask = rs <= 100*u.arcsec

@@ -24,7 +24,7 @@ pylab.rcParams.update(params)
 import sys
 
 # read in data
-sources = ascii.read("../karls_suggestion/high_sn_sources.tab")
+sources = ascii.read("../karls_suggestion/high_sn_sources_combined.tab")
 sources = sources[sources["mask"]==1]
 
 # get the luminosity
@@ -47,21 +47,36 @@ else:
 
 narrow_lines = sources["linewidth_km/s"] < 1000/2.35
 low_luminosity = sources["luminosity"] < 10**43
-low_continuum = sources["gmag"] > 24
-sfg_sample = narrow_lines & low_luminosity & low_continuum
-agn_sample = ~sfg_sample
 
-SFG_SAMPLE = True #(args.sfg == 'True')
-AGN_SAMPLE = ~SFG_SAMPLE
+broad_line_sample = ~narrow_lines
+print('1. The broad line sample contains {} sources.'.format(len(broad_line_sample[broad_line_sample])))
 
-if SFG_SAMPLE:
-	print('Using SFG sample.')
-	sources = sources[total_mask * sfg_sample]
-else:
-	print('Using AGN-dominated sample.')
-	sources = sources[total_mask * agn_sample]
+narrow_line_high_L_sample = narrow_lines * (~low_luminosity)
+print('2. The narrow line, high L sample contains {} sources.'.format(len(narrow_line_high_L_sample[narrow_line_high_L_sample])))
+
+narrow_line_low_L_sample = narrow_lines * low_luminosity
+print('3. The narrow line, low L sample contains {} sources.'.format(len(narrow_line_low_L_sample[narrow_line_low_L_sample])))
+
+sample = 3
+SAMPLE_1 = sample == 1
+SAMPLE_2 = sample == 2
+SAMPLE_3 = sample == 3
+if (not SAMPLE_1) * (not SAMPLE_2) * (not SAMPLE_3):
+	logging.error('The --sample option must have a 1, 2, or 3. Cancelling this script.')
+	sys.exit()
+
+if SAMPLE_1:
+	print('Using broad line sample.')
+	sources = sources[total_mask * broad_line_sample]
+elif SAMPLE_2:
+	print('Using narrow line, high L sample.')
+	sources = sources[total_mask * narrow_line_high_L_sample]
+elif SAMPLE_3:
+	print('Using narrow line, low L sample.')
+	sources = sources[total_mask * narrow_line_low_L_sample]
 
 print("len(sources) = {}".format( len(sources)))
+N = len(sources)
 
 
 z_max = np.nanmax(sources["redshift"])
@@ -69,7 +84,7 @@ z_min = np.nanmin(sources["redshift"])
 min_bin_step = 2./(1+z_max) # narrowest bins
 min_bins = np.arange(3470/(1+z_max), 5542/(1+z_min) + min_bin_step, min_bin_step)
 
-big_list = {}
+big_list = {'central':[]}
 r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
 r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320, 800])
 for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
@@ -85,8 +100,11 @@ for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
 
 		big_list[appendix].append(tab)
 
+		if r_min==0:
+			big_list['central'].append(np.interp(min_bins, tmp['wave_rest'], tmp['central']))
+
 		if i%100==0:
-			print(f"Done with {i}/3692.")
+			print(f"Done with {i}/{N}.")
 
 
 stack_median = {}
