@@ -216,7 +216,6 @@ def get_stack_proper(r_bins_min, r_bins_max, data_r, data_flux, data_redshift, k
 	return r_bins_mid, np.array(stack)/fiberarea, np.array(e_stack)/fiberarea
 
 save_dir = "/scratch/05865/maja_n"
-basedir = "/work2/05865/maja_n/stampede2/master"
 
 # read in data
 sources = ascii.read("../karls_suggestion/high_sn_sources_combined.tab")
@@ -228,7 +227,7 @@ z_lae_err = (sources["wave_err"]/1215.67)
 sources["redshift"] = z_lae
 sources["luminosity"] = (sources["flux_213"])*1e-17*4*np.pi*(cosmo.luminosity_distance(sources["redshift"]).to(u.cm)/u.cm)**2
 c = 3*10**5 # km/s
-doppler_v_of = c * sources["linewidth"] / sources["wave"]
+doppler_v_of = c * sources['linewidth'] / sources["wave"]
 sources["linewidth_km/s"] = doppler_v_of
 
 total_mask = np.ones(len(sources), dtype=bool)
@@ -397,9 +396,12 @@ for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
 	big_tab_proper["r/kpc"] = r_kpc
 	big_tab_proper["delta_r/kpc"] = r_bins_kpc_xbars
 
-	r_kpc, big_tab_proper["median_no_troughsub_all"], big_tab_proper["err_median_no_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux"], long_tab["redshift"])
-	r_kpc, big_tab_proper["mean_troughsub_all"], big_tab_proper["err_mean_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
-	r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
+	r_kpc, big_tab_proper["median_no_troughsub_all"], big_tab_proper["err_median_no_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux"], long_tab["redshift"])
+	r_kpc, big_tab_proper["mean_troughsub_all"], big_tab_proper["err_mean_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
+	r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
+	r_kpc, big_tab_proper["median_troughsub_2_all"], big_tab_proper["err_median_troughsub_2_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux_troughsub_2"], long_tab["redshift"])
+        
+	r_kpc, big_tab_proper["median_redcontinuum_all"], big_tab_proper["err_median_redcontinuum_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["red_cont_flux"], long_tab["redshift"])
 
 	save_file = os.path.join(args.final_dir, "radial_profiles_empty_wlshift/radial_profiles_proper_multimask{}_{}.tab".format(DIR_APX, d_wl))
 	ascii.write(big_tab_proper, save_file)

@@ -118,7 +118,7 @@ else:
 	print("Could not identify a valid argument for flagkarl: True or False.")
 
 
-DIR_APX = DIR_APX + "_testmeantroughsub"
+DIR_APX = DIR_APX 
 print("Final directory appendix: "+DIR_APX)
 
 
@@ -127,7 +127,7 @@ def load_shot(shot):
         table = Table(fileh.root.Data.Fibers.read())
         fileh.close()
         return table
- 
+
 def save_lae(detectid):
 	lae = complete_lae_tab[complete_lae_tab["detectid"]==detectid]
 	real_lae_coords = SkyCoord(ra=lae['ra']*u.deg, dec=lae['dec']*u.deg)
@@ -257,12 +257,18 @@ def save_lae(detectid):
 		lae_wave = lae["wave"] + d_wave
 		lae_linewidth = lae["linewidth"]
 		cont_wlhere = (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>2.5*lae_linewidth)
-		#trough_continuum = np.nanmedian(spec_here[:,cont_wlhere], axis=1)
-		trough_continuum = np.nanmean(spec_here[:,cont_wlhere], axis=1)
+		trough_continuum = np.nanmedian(spec_here[:,cont_wlhere], axis=1)
 		N = np.nansum(ones[:,cont_wlhere], axis=1)
 		trough_continuum_error = biweight_scale(spec_here[:,cont_wlhere], axis=1) / np.sqrt(N)
 		trough_contsub = (spec_here.T - trough_continuum).T
 		trough_contsub_error = np.sqrt(err_here.T**2 + trough_continuum_error**2).T
+    
+		cont_wlhere_2 = (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>3.5*lae_linewidth)
+		trough_continuum_2 = np.nanmedian(spec_here[:,cont_wlhere_2], axis=1)
+		N = np.nansum(ones[:,cont_wlhere_2], axis=1)
+		trough_continuum_error_2 = biweight_scale(spec_here[:,cont_wlhere_2], axis=1) / np.sqrt(N)
+		trough_contsub_2 = (spec_here.T - trough_continuum_2).T
+		trough_contsub_error_2 = np.sqrt(err_here.T**2 + trough_continuum_error_2**2).T
 		
 		wlhere = abs(def_wave - lae_wave) <= 1.5 * lae_linewidth
 		wlhere_4 = abs(def_wave - lae_wave) <= 2 # integration window 4AA
@@ -275,6 +281,8 @@ def save_lae(detectid):
 		spec_sub_err = np.sqrt(np.nansum(continuum_subtracted_error[:,wlhere]**2, axis=1))
 		spec_troughsub_sum = np.nansum(trough_contsub[:,wlhere], axis=1)
 		spec_troughsub_err = np.sqrt(np.nansum(trough_contsub_error[:,wlhere], axis=1))
+		spec_troughsub_sum_2 = np.nansum(trough_contsub_2[:,wlhere], axis=1)
+		spec_troughsub_err_2 = np.sqrt(np.nansum(trough_contsub_error_2[:,wlhere], axis=1))
 
 		# fixed integration window (4AA)			
 		spec_sum_4 = np.nansum(spec_here[:,wlhere_4], axis=1)
@@ -292,6 +300,9 @@ def save_lae(detectid):
 		spec_troughsub_sum_11 = np.nansum(trough_contsub[:,wlhere_11], axis=1)
 		spec_troughsub_err_11 = np.sqrt(np.nansum(trough_contsub_error[:,wlhere_11], axis=1))
 
+		red_cont_wlhere = (def_wave > lae_wave + 5*lae_linewidth) * (def_wave <= lae_wave + 5*lae_linewidth + 100)
+		red_cont_flux = np.nanmedian(spec_here[:,red_cont_wlhere], axis=1)
+        
 		mask = (spec_sum != 0) & (err_sum != 0) & (spec_sum_4 != 0) & (err_sum_4 != 0) & (spec_sum_11 != 0 ) & (err_sum_11 != 0) & (spec_troughsub_sum != 0) & (spec_troughsub_sum_4 != 0) & (spec_troughsub_sum_11 != 0)
 		rs_0 = rs[mask][:] / u.arcsec
 		rs_0 = rs_0.decompose()
@@ -309,16 +320,19 @@ def save_lae(detectid):
 		spec_sub_err_4 = spec_sub_err_4[mask].data[:]
 		spec_sub_err_11 = spec_sub_err_11[mask].data[:]
 		spec_troughsub_sum = spec_troughsub_sum[mask].data[:]
+		spec_troughsub_sum_2 = spec_troughsub_sum_2[mask].data[:]
 		spec_troughsub_sum_4 = spec_troughsub_sum_4[mask].data[:]
 		spec_troughsub_sum_11 = spec_troughsub_sum_11[mask].data[:]
 		spec_troughsub_err = spec_troughsub_err[mask].data[:]
+		spec_troughsub_err_2 = spec_troughsub_err_2[mask].data[:]
 		spec_troughsub_err_4 = spec_troughsub_err_4[mask].data[:]
 		spec_troughsub_err_11 = spec_troughsub_err_11[mask].data[:]
 		mask_7_here_0 = mask_7_here[mask]
 		mask_10_here_0 = mask_10_here[mask]
 		lae_ra_0 = lae_ra[mask]
 		lae_dec_0 = lae_dec[mask]
-			
+		red_cont_flux = red_cont_flux[mask].data[:]
+
 		if NEWFLAG:
 			new_mask_0 = {}
 			for cutoff in new_mask.keys():
@@ -337,16 +351,19 @@ def save_lae(detectid):
 			"err_contsub_4": spec_sub_err_4,
 			"err_contsub_11": spec_sub_err_11,
 			"flux_troughsub": spec_troughsub_sum,
+			"flux_troughsub_2": spec_troughsub_sum_2,
 			"flux_troughsub_4": spec_troughsub_sum_4,
 			"flux_troughsub_11": spec_troughsub_sum_11,
 			"err_troughsub": spec_troughsub_err,
+			"err_troughsub_2": spec_troughsub_err_2,
 			"err_troughsub_4": spec_troughsub_err_4,
 			"err_troughsub_11": spec_troughsub_err_11,
 			"sigma": err_sum,
 			"sigma_4": err_sum_4,
 			"sigma_11": err_sum_11,
 			"mask_7": mask_7_here_0,
-			"mask_10": mask_10_here_0}
+			"mask_10": mask_10_here_0,
+			"red_cont_flux": red_cont_flux}
 		if NEWFLAG:
 			for cutoff in new_mask.keys():
 				tab["new_mask_{}".format(cutoff)] = new_mask_0[cutoff]
@@ -356,7 +373,7 @@ def save_lae(detectid):
 		print("Wrote to "+save_file)
 	return 1
 
-basedir = "/work2/05865/maja_n/stampede2/master"
+basedir = "/work/05865/maja_n/stampede2/master"
 savedir = "/scratch/05865/maja_n"
 complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources_combined.tab"))
 complete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]

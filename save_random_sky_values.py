@@ -137,7 +137,7 @@ z_lae_err = (sources["wave_err"]/1215.67)
 sources["redshift"] = z_lae
 sources["luminosity"] = (sources["flux_213"])*1e-17*4*np.pi*(cosmo.luminosity_distance(sources["redshift"]).to(u.cm)/u.cm)**2
 c = 3*10**5 # km/s
-doppler_v_of = c * sources["linewidth"] / sources["wave"]
+doppler_v_of = c * sources['linewidth'] / sources["wave"]
 sources["linewidth_km/s"] = doppler_v_of
 
 total_mask = np.ones(len(sources), dtype=bool)
@@ -241,7 +241,7 @@ logging.info("See if masking works: {}".format( len(bogus_tab), len(bogus_tab[bo
 # bogus values
 bogus_dict = {}
 fiber_area = np.pi*(0.75)**2
-for key in ["flux", "flux_troughsub", "flux_4", "flux_troughsub_4", "flux_11", "flux_troughsub_11"]:
+for key in ["flux", "flux_troughsub", "flux_troughsub_2", "flux_4", "flux_troughsub_4", "flux_11", "flux_troughsub_11"]:
 	bogus_tab[key] = bogus_tab[key] / fiber_area
 
 MASK_CONTINUUM_FIBERS = (args.mask_continuum == 'True')
@@ -273,6 +273,20 @@ for mask_name in long_lae_masks.keys():
 	bogus_dict["perc_upper_median_troughsub_"+mask_name] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 	bogus_dict["err_median_troughsub_"+mask_name] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
 
+total_randoms = bogus_tab["flux_troughsub_2"]
+N = len(total_randoms)
+bogus_dict["median_troughsub_2_all"] = [np.nanmedian(total_randoms)]
+bogus_dict["err_median_troughsub_2_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+bogus_dict["err_median_troughsub_2_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+bogus_dict["err_median_troughsub_2_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+
+total_randoms = bogus_tab["red_cont_flux"]
+N = len(total_randoms)
+bogus_dict["median_redcontinuum_all"] = [np.nanmedian(total_randoms)]
+bogus_dict["err_median_redcontinuum_all"] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
+bogus_dict["err_median_redcontinuum_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
+bogus_dict["err_median_redcontinuum_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
+    
 total_randoms = bogus_tab["flux"]
 N = len(total_randoms)
 bogus_dict["median_no_troughsub_all"] = [np.nanmedian(total_randoms)]
@@ -310,29 +324,35 @@ bogus_dict["err_median_troughsub_11d_perc_upper_all"] = [abs(np.nanmedian(total_
 
 
 ############ bootstrapping to get the standard error of the median ############################################################################
-total_randoms = bogus_tab['flux_troughsub']
-total_redshifts = bogus_tab['redshift']
-total_redshifts = total_redshifts[np.isfinite(total_randoms)]
-total_randoms = total_randoms[np.isfinite(total_randoms)]
-total_indices = np.arange(len(total_randoms))
 
-B = args.bootstrap
-N = len(total_randoms)
-logging.info('Starting bootstrapping with B={} and N={}.'.format(B, N))
-sample_medians = []
-sample_medians_ra = []
-for i in range(B):
-	new_sample = random.choices(total_indices, k=N) # Return a k sized list of elements chosen from the population with replacement.
-	sample_medians.append(np.nanmedian(total_randoms[new_sample]))
-	sample_medians_ra.append(np.nanmedian(total_randoms[new_sample]*(1+total_redshifts[new_sample])**4))
-	logging.info('Finished {}.'.format(i))
-mean_of_medians = np.nanmean(sample_medians)
-std_of_medians = np.nanstd(sample_medians)
-std_of_medians_ra = np.nanstd(sample_medians_ra)
+names = {'flux_troughsub':'_troughsub_all', 'flux_troughsub_2':'_troughsub_2_all', 'red_cont_flux':'_redcontinuum_all'}
+for key in names.keys():
+    total_randoms = bogus_tab[key]
+    total_redshifts = bogus_tab['redshift']
+    total_redshifts = total_redshifts[np.isfinite(total_randoms)]
+    total_randoms = total_randoms[np.isfinite(total_randoms)]
+    total_indices = np.arange(len(total_randoms))
+    
+    sample_medians, sample_medians_ra = [], []
 
-bogus_dict['mean_of_medians_troughsub_all'] = [mean_of_medians]
-bogus_dict['std_of_medians_troughsub_all'] = [std_of_medians]
-bogus_dict['std_of_medians_troughsub_all_ra'] = [std_of_medians_ra]
+    B = args.bootstrap
+    N = len(total_randoms)
+    logging.info('Starting bootstrapping with B={} and N={}.'.format(B, N))
+
+    for i in range(B):
+        new_sample = random.choices(total_indices, k=N) # Return a k sized list of elements chosen from the population with replacement.
+        sample_medians.append(np.nanmedian(total_randoms[new_sample]))
+        sample_medians_ra.append(np.nanmedian(total_randoms[new_sample]*(1+total_redshifts[new_sample])**4))
+        
+        logging.info('Finished {}.'.format(i))
+        
+    mean_of_medians = np.nanmean(sample_medians)
+    std_of_medians = np.nanstd(sample_medians)
+    std_of_medians_ra = np.nanstd(sample_medians_ra)
+
+    bogus_dict['mean_of_medians'+names[key]] = [mean_of_medians]
+    bogus_dict['std_of_medians'+names[key]] = [std_of_medians]
+    bogus_dict['std_of_medians'+names[key]+'_ra'] = [std_of_medians_ra]
 
 savefile = os.path.join(final_dir, "random_sky_values_multimasks{}.tab".format(DIR_APX))
 ascii.write(bogus_dict, savefile)

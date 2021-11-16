@@ -170,7 +170,7 @@ z_lae_err = (sources["wave_err"]/1215.67)
 sources["redshift"] = z_lae
 sources["luminosity"] = (sources["flux_213"])*1e-17*4*np.pi*(cosmo.luminosity_distance(sources["redshift"]).to(u.cm)/u.cm)**2
 c = 3*10**5 # km/s
-doppler_v_of = c * sources["linewidth"] / sources["wave"]
+doppler_v_of = c * sources['linewidth'] / sources["wave"]
 sources["linewidth_km/s"] = doppler_v_of
 
 total_mask = np.ones(len(sources), dtype=bool)
@@ -232,7 +232,6 @@ for key in lae_masks.keys():
 	long_lae_masks[key] = []
 
 savedir = "/scratch/05865/maja_n"
-#"/work2/05865/maja_n/stampede2/master"
 
 # real LAE data
 logging.info("Reading LAEs...")
@@ -325,48 +324,64 @@ r_kpc, big_tab_proper["median_no_troughsub_all"], big_tab_proper["err_median_no_
 r_kpc, big_tab_proper["mean_troughsub_all"], big_tab_proper["err_mean_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
 r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
 
+r_kpc, big_tab_proper["median_troughsub_2_all"], big_tab_proper["err_median_troughsub_2_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux_troughsub_2"], long_tab["redshift"])
+r_kpc, big_tab_proper["median_redcontinuum_all"], big_tab_proper["err_median_redcontinuum_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["red_cont_flux"], long_tab["redshift"])
+
 ############ bootstrapping to get the standard error of the median ############################################################################
 B = args.bootstrap
 logging.info('Starting bootstrapping with B={}.'.format(B))
 
 kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(long_tab['redshift'])/60*u.arcmin/u.kpc
-stack  = []
-stack_ra = []
+stack  = {EXTENSION:[], 'flux_troughsub_2':[], 'red_cont_flux':[]}
+stack_ra = {EXTENSION:[], 'flux_troughsub_2':[], 'red_cont_flux':[]}
 fiberarea = np.pi*0.75**2
 data_r = long_tab['r']
-data_flux = long_tab[EXTENSION]
+data_flux = {EXTENSION: long_tab[EXTENSION], 
+            'flux_troughsub_2': long_tab['flux_troughsub_2'],
+            'red_cont_flux': long_tab['red_cont_flux']}
 data_redshift = long_tab['redshift']
 for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
-	here = (data_r*kpc_per_arcsec < r_max)&(data_r*kpc_per_arcsec >= r_min)
-	tmp_flux = data_flux[here]
-	tmp_z = data_redshift[here]
-	stack.append(tmp_flux / fiberarea)
-	stack_ra.append(tmp_flux * (1+tmp_z)**4 / fiberarea)
+    here = (data_r*kpc_per_arcsec < r_max)&(data_r*kpc_per_arcsec >= r_min)
+    for key in stack.keys():
+        tmp_flux = data_flux[key][here]
+        tmp_z = data_redshift[here]
+        stack[key].append(tmp_flux / fiberarea)
+        stack_ra[key].append(tmp_flux * (1+tmp_z)**4 / fiberarea)
 
-stack = [np.array(x) for x in stack]
-stack = [x[np.isfinite(x)] for x in stack]
-stack_ra = [np.array(x) for x in stack_ra]
-stack_ra = [x[np.isfinite(x)] for x in stack_ra]
-M = len(stack)
-sample_medians = [[] for i in range(M)]
-sample_medians_ra = [[] for i in range(M)]
-Ns = [len(stack[i]) for i in range(M)]
+sample_medians, sample_medians_ra, Ns = {}, {}, {}
+for key in stack.keys():
+    stack[key] = [np.array(x) for x in stack[key]]
+    stack[key] = [x[np.isfinite(x)] for x in stack[key]]
+    stack_ra[key] = [np.array(x) for x in stack_ra[key]]
+    stack_ra[key] = [x[np.isfinite(x)] for x in stack_ra[key]]
+    M = len(stack[key])
+    sample_medians[key] = [[] for i in range(M)]
+    sample_medians_ra[key] = [[] for i in range(M)]
+    Ns[key] = [len(stack[key][i]) for i in range(M)]
+    
 for i in range(B):
-	for j in range(M):
-		total_randoms = stack[j]
-		total_randoms_ra = stack_ra[j]
-		total_indices = np.arange(len(stack[j]))
-		new_sample = random.choices(total_indices, k=Ns[j]) # Return a k sized list of elements chosen from the population with replacement.
-		sample_medians[j].append(np.nanmedian(total_randoms[new_sample]))
-		sample_medians_ra[j].append(np.nanmedian(total_randoms_ra[new_sample]))
+    for j in range(M):
+        for key in stack.keys():
+            total_randoms = stack[key][j]
+            total_randoms_ra = stack_ra[key][j]
+            total_indices = np.arange(len(stack[key][j]))
+            new_sample = random.choices(total_indices, k=Ns[key][j]) # Return a k sized list of elements chosen from the population with replacement.
+            sample_medians[key][j].append(np.nanmedian(total_randoms[new_sample]))
+            sample_medians_ra[key][j].append(np.nanmedian(total_randoms_ra[new_sample]))
 
-	logging.info('Finished {}.'.format(i))
-mean_of_medians = [np.nanmean(sample_medians[j]) for j in range(M)]
-std_of_medians = [np.nanstd(sample_medians[j]) for j in range(M)]
-std_of_medians_ra = [np.nanstd(sample_medians_ra[j]) for j in range(M)]
+    if i%100==0:
+        logging.info('Finished {}.'.format(i))
+    
+names = {EXTENSION: 'err_median_troughsub_bootstrap',
+        'flux_troughsub_2': 'err_median_troughsub_2_bootstrap',
+        'red_cont_flux': 'err_median_redcontinuum_bootstrap'}
+for key in stack.keys():
+    mean_of_medians = [np.nanmean(sample_medians[key][j]) for j in range(M)]
+    std_of_medians = [np.nanstd(sample_medians[key][j]) for j in range(M)]
+    std_of_medians_ra = [np.nanstd(sample_medians_ra[key][j]) for j in range(M)]
 
-big_tab_proper['err_median_troughsub_bootstrap'] = std_of_medians
-big_tab_proper['err_median_troughsub_bootstrap_ra'] = std_of_medians_ra
+    big_tab_proper[names[key]] = std_of_medians
+    big_tab_proper[names[key]+'_ra'] = std_of_medians_ra
 
 ascii.write(big_tab_proper, os.path.join(final_dir, f"radial_profiles_proper_multimasks_new_mask{DIR_APX}_unflagged.tab"))
 
