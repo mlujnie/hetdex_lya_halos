@@ -28,6 +28,8 @@ parser.add_argument("-sr", "--subtract_residual", type=str, default="False", hel
 parser.add_argument("-bc", "--background_correction", type=str, default="False", help="Add wavelength-dependent background correction.")
 parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
 parser.add_argument("--samelambda", type=str, default='False', help='Use the Lya wavelength as the central wavelength and make sure that the fiber is further away than 2.')
+parser.add_argument("--museskysub", type=str, default = "False", help="Imitate MUSE's sky subtraction: subtract average spectrum in each IFU.")
+parser.add_argument('--flagkarl', type=str, default='False', help='Flagging all fibers that Karl would flag in the sky subtraction.')
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -95,6 +97,28 @@ elif args.samelambda == 'False':
 else:
 	print("Could not identify a valid argument for samelambda: True or False.")
 
+if args.museskysub == "True":
+	MUSE_SKYSUB = True
+	DIR_APX = DIR_APX + "_MUSE"
+	print("Imitating MUSE's sky subtraction: subtracting average spectrum in each IFU.")
+elif args.museskysub == "False":
+	MUSE_SKYSUB = False
+	print("Not applying MUSE's sky subtraction.")
+else:
+	print("Could not identify a valid argument for museskysub: True or False.")
+
+if args.flagkarl == 'True':
+	FLAGKARL = True
+	DIR_APX = DIR_APX + "_flagkarl"
+	print("Masking all fibers that Karl would flag.")
+elif args.flagkarl == 'False':
+	FLAGKARL = False
+	print("Not flagging Karl's fibers.")
+else:
+	print("Could not identify a valid argument for flagkarl: True or False.")
+
+
+DIR_APX = DIR_APX + "_testmeantroughsub"
 print("Final directory appendix: "+DIR_APX)
 
 
@@ -233,7 +257,8 @@ def save_lae(detectid):
 		lae_wave = lae["wave"] + d_wave
 		lae_linewidth = lae["linewidth"]
 		cont_wlhere = (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>2.5*lae_linewidth)
-		trough_continuum = np.nanmedian(spec_here[:,cont_wlhere], axis=1)
+		#trough_continuum = np.nanmedian(spec_here[:,cont_wlhere], axis=1)
+		trough_continuum = np.nanmean(spec_here[:,cont_wlhere], axis=1)
 		N = np.nansum(ones[:,cont_wlhere], axis=1)
 		trough_continuum_error = biweight_scale(spec_here[:,cont_wlhere], axis=1) / np.sqrt(N)
 		trough_contsub = (spec_here.T - trough_continuum).T
@@ -357,16 +382,16 @@ c = np.nanmin([np.ones(1036)*(1035-190), b-190], axis=0)
 filter_min = np.array(c, dtype=int)
 filter_max = np.array(b, dtype=int)
 
-for shotid in np.unique(complete_lae_tab["shotid"])[::-1]:
+for shotid in np.unique(complete_lae_tab["shotid"]):
 
 	#load the shot table and prepare full-frame sky subtracted spectra
 
 	laes_here = complete_lae_tab[complete_lae_tab["shotid"]==shotid]
 	if len(laes_here)<1:
 		continue
-	done = True 
+	done = True
 	for detectid in laes_here["detectid"].data:
-		done *= os.path.exists(os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}/bogus_1_{detectid}.dat"))
+		done *= os.path.exists(os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}/bogus_2_{detectid}.dat"))
 
 	if done:
 		print("Already finished", shotid)
@@ -413,6 +438,44 @@ for shotid in np.unique(complete_lae_tab["shotid"])[::-1]:
 	medians_hi = np.nanmedian(ffskysub[:,wlcont_hi], axis=1)
 	perc_hi = np.nanpercentile(medians_hi, perc)
 	mask_10 = (abs(medians_lo)<perc_lo) & (abs(medians_hi)<perc_hi)
+
+	if FLAGKARL:
+		wl_karl = (def_wave >= 4100) * (def_wave <= 5100)
+		medians = biweight_location(ffskysub[:,wl_karl], axis=1, ignore_nan=True)
+		sigma_of_medians = biweight_scale(medians, ignore_nan=True)
+		median_of_medians = biweight_location(medians, ignore_nan=True)
+		flag_one = medians > median_of_medians + 3*sigma_of_medians
+		print('np.where(flag_one)[0])', np.where(flag_one)[0])
+		print('Number of flagged fibers:', len(flag_one[flag_one]))
+		here = np.where(flag_one)[0]
+		print(here)
+		print(here+1)
+		if len(flag_one) in (here+1):
+			here[-1] = here[-1] - 1 # so that I don't get an index error.
+		flag_one[here+1] = True
+		flag_one[here-1] = True
+		print('Number of flagged fibers (and neighbors):', len(flag_one[flag_one]))
+		perc_90_remaining = np.nanpercentile(medians[~flag_one], 90)
+		flag_two = medians > perc_90_remaining
+
+		final_flag = ~((~flag_one)*(~flag_two))
+		print("Percentage of fibers remaining:", len(final_flag[~final_flag])/len(final_flag)*100)
+		print("Before flagging: ", len(ffskysub[np.isfinite(ffskysub)]))
+		ffskysub[final_flag] *= np.nan	
+		print("After flagging: ", len(ffskysub[np.isfinite(ffskysub)]))
+
+	if MUSE_SKYSUB:
+		perc = 90
+		for ifu in np.unique(shot_tab["ifuid"]):
+			ifu_here = shot_tab["ifuid"] == ifu
+			medians_lo = np.nanmedian(ffskysub[ifu_here][:,wlcont_lo], axis=1)
+			medians_hi = np.nanmedian(ffskysub[ifu_here][:,wlcont_hi], axis=1)
+			perc_lo = np.nanpercentile(medians_lo, perc)
+			perc_hi = np.nanpercentile(medians_hi, perc)
+			mask_here = (abs(medians_lo)<perc_lo) & (abs(medians_hi)<perc_hi)
+			sky_spectrum_here = np.nanmedian(ffskysub[ifu_here][mask_here], axis=0)
+			ffskysub[ifu_here] -= sky_spectrum_here
+
 
 	if SUBTRACT_RESIDUAL:
 		# subtract the median spectrum (residual)

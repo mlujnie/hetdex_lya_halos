@@ -32,72 +32,72 @@ from astropy.stats import biweight_location, biweight_midvariance, median_absolu
 
 
 def biweight_location_weights(data, weights, c=6.0, M=None, axis=None):
-    """ weighted biweight location a la Karl
-        nan-resistant and excludes data with zero weights"""
+	""" weighted biweight location a la Karl
+		nan-resistant and excludes data with zero weights"""
 
-    data = np.asanyarray(data).astype(np.float64)
-    weights = np.asanyarray(weights).astype(np.float64)
+	data = np.asanyarray(data).astype(np.float64)
+	weights = np.asanyarray(weights).astype(np.float64)
    
-    data[weights==0] = np.nan 
-    weights[~np.isfinite(data)] = np.nan
-    
-    if (data.shape!=weights.shape):
-        raise ValueError("data.shape != weights.shape")
+	data[weights==0] = np.nan 
+	weights[~np.isfinite(data)] = np.nan
+	
+	if (data.shape!=weights.shape):
+		raise ValueError("data.shape != weights.shape")
 
-    if M is None:
-        M = np.nanmedian(data, axis=axis)
-    if axis is not None:
-        M = np.expand_dims(M, axis=axis)
+	if M is None:
+		M = np.nanmedian(data, axis=axis)
+	if axis is not None:
+		M = np.expand_dims(M, axis=axis)
 
-    # set up the differences
-    d = data - M
+	# set up the differences
+	d = data - M
 
-    # set up the weighting
-    mad = median_absolute_deviation(data, axis=axis, ignore_nan=True)
-    #madweights = median_absolute_deviation(weights, axis=axis)
+	# set up the weighting
+	mad = median_absolute_deviation(data, axis=axis, ignore_nan=True)
+	#madweights = median_absolute_deviation(weights, axis=axis)
 
-    if axis is None and mad == 0.:
-        return M  # return median if data is a constant array
-    
-    #if axis is None and madweights == 0:
-    #    madweights = 1.
+	if axis is None and mad == 0.:
+		return M  # return median if data is a constant array
+	
+	#if axis is None and madweights == 0:
+	#	madweights = 1.
 
-    if axis is not None:
-        mad = np.expand_dims(mad, axis=axis)
-        const_mask = (mad == 0.)
-        mad[const_mask] = 1.  # prevent divide by zero
+	if axis is not None:
+		mad = np.expand_dims(mad, axis=axis)
+		const_mask = (mad == 0.)
+		mad[const_mask] = 1.  # prevent divide by zero
 
-    #if axis is not None:
-    #    madweights = np.expand_dims(madweights, axis=axis)
-    #    const_mask = (madweights == 0.)
-    #    madweights[const_mask] = 1.  # prevent divide by zero
+	#if axis is not None:
+	#	madweights = np.expand_dims(madweights, axis=axis)
+	#	const_mask = (madweights == 0.)
+	#	madweights[const_mask] = 1.  # prevent divide by zero
 
-    cmadsq = (c*mad)**2
-    
-    factor = 0.5
-    weights  = weights/np.nanmedian(weights)*factor 
-    
-    u = d / (c * mad)
+	cmadsq = (c*mad)**2
+	
+	factor = 0.5
+	weights  = weights/np.nanmedian(weights)*factor 
+	
+	u = d / (c * mad)
 
-    # now remove the outlier points
-    mask = (np.abs(u) >= 1)
-    #print("number of excluded points ", len(mask[mask]))
-    
-    u = (1 - u ** 2) ** 2
-    
-    weights[~np.isfinite(weights)] = 0
-    
-    u = u + weights**2
-    u[weights==0] = 0
-    d[weights==0] = 0
-    u[mask] = 0
+	# now remove the outlier points
+	mask = (np.abs(u) >= 1)
+	#print("number of excluded points ", len(mask[mask]))
+	
+	u = (1 - u ** 2) ** 2
+	
+	weights[~np.isfinite(weights)] = 0
+	
+	u = u + weights**2
+	u[weights==0] = 0
+	d[weights==0] = 0
+	u[mask] = 0
 
-    # along the input axis if data is constant, d will be zero, thus
-    # the median value will be returned along that axis
-    return M.squeeze() + (d * u).sum(axis=axis) / u.sum(axis=axis)
+	# along the input axis if data is constant, d will be zero, thus
+	# the median value will be returned along that axis
+	return M.squeeze() + (d * u).sum(axis=axis) / u.sum(axis=axis)
 
 def lae_powerlaw_profile(r, c1, c2):
-    return c1*psf_func((FWHM, r)) + c2*powerlaw_func((FWHM, r))
+	return c1*psf_func((FWHM, r)) + c2*powerlaw_func((FWHM, r))
 
 def fit_moffat(dist, amp, fwhm):
 	beta = 3.
@@ -111,40 +111,50 @@ star_sources = ascii.read("star_gaia_tab.tab")
 i=0
 N = 3795
 #for source in star_sources:
-#    detectid = source["detectid"]
-#    lae_file = "../radial_profiles/stars_skymask/star_{}.dat".format(detectid)
+#	detectid = source["detectid"]
+#	lae_file = "../radial_profiles/stars_skymask/star_{}.dat".format(detectid)
 for lae_file in glob.glob("../radial_profiles/stars_skymask/star_*.dat"):
-    try:
-        #lae_file = glob.glob(lae_file)[0]
-        lae_tab = ascii.read(lae_file)
-        lae_tab["mask_7"] = np.array(lae_tab["mask_7"]=="True").astype(int)
-        lae_tab["mask_10"] = np.array(lae_tab["mask_10"]=="True").astype(int)
-        star_list.append(lae_tab)
-        i+=1
-        if i%100 == 0:
-            print(f"Finished {i}/{N}")
-    except Exception as e:
-        #print("Failed to read "+lae_file)
-        print(e)
-        pass
+	try:
+		#lae_file = glob.glob(lae_file)[0]
+		lae_tab = ascii.read(lae_file)
+		lae_tab["mask_7"] = np.array(lae_tab["mask_7"]=="True").astype(int)
+		lae_tab["mask_10"] = np.array(lae_tab["mask_10"]=="True").astype(int)
+		star_list.append(lae_tab)
+		i+=1
+		if i%100 == 0:
+			print(f"Finished {i}/{N}")
+	except Exception as e:
+		#print("Failed to read "+lae_file)
+		print(e)
+		pass
 
-        
+		
 star_tab= vstack(star_list)
 star_tab["mask_7"] = star_tab["mask_7"].astype(bool)
 star_tab["mask_10"] = star_tab["mask_10"].astype(bool)
 
-star_tab = star_tab[np.isfinite(star_tab["flux"])&np.isfinite(star_tab["sigma"])]
+star_tab = star_tab[np.isfinite(star_tab["flux"])&np.isfinite(star_tab["sigma"])*(star_tab['flux']!=0.0)]
+for central_lambda in [3800, 4000, 4200, 4400, 4600, 4800, 5000, 5200, 5400]:
+	star_tab = star_tab[star_tab['flux_contsub_{}'.format(central_lambda)]!=0.0]
 
 
 # stack stars
-r_bins = [ 0. ,  0.5,  1. ,  1.5,  2. ,  2.5,  3. ,  3.5,  4. ,  4.5, 5,  7,  9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39]
+r_bins = [ 0. ,  0.5,  1. ,  1.5,  2. ,  2.5,  3. ,  3.5,  4. ,  4.5, 5,  7,  9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 45, 50, 55, 60, 65, 70, 80, 100]
 
 stack_r, stack_flux, stack_error, stack_flux_bw = [], [], [], []
+stack_contsub, stack_contsub_error = {}, {}
+for central_lambda in [3800, 4000, 4200, 4400, 4600, 4800, 5000, 5200, 5400]:
+	stack_contsub[central_lambda] = []
+	stack_contsub_error[central_lambda] = []
+
 for r_min, r_max in zip(r_bins[:-1], r_bins[1:]):
-    stack_r.append(r_min+(r_max-r_min)/2.)
-    stack_flux.append(np.nanmedian(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)]))
-    stack_flux_bw.append(biweight_location(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)]))
-    stack_error.append(biweight_scale(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)])/np.sqrt(len(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)])))
+	stack_r.append(r_min+(r_max-r_min)/2.)
+	stack_flux.append(np.nanmedian(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)]))
+	stack_flux_bw.append(biweight_location(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)]))
+	stack_error.append(biweight_scale(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)])/np.sqrt(len(star_tab["flux"][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)])))
+	for central_lambda in [3800, 4000, 4200, 4400, 4600, 4800, 5000, 5200, 5400]:
+		stack_contsub[central_lambda].append(np.nanmedian(star_tab["flux_contsub_{}".format(central_lambda)][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)]))
+		stack_contsub_error[central_lambda].append(biweight_scale(star_tab["flux_contsub_{}".format(central_lambda)][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)])/np.sqrt(len(star_tab["flux_contsub_{}".format(central_lambda)][(star_tab["r"]>=r_min)&(star_tab["r"]<r_max)])))
 
 stack_r = np.array(stack_r)
 stack_flux = np.array(stack_flux)
@@ -156,6 +166,9 @@ stack_integral_bw = np.nansum(stack_flux_bw[stack_r<=2.0])*(stack_r[1]-stack_r[0
 
 rad_tab = {"r": stack_r, "median": stack_flux, "biweight_location": stack_flux_bw, "bw_error": stack_error}
 
+for central_lambda in [3800, 4000, 4200, 4400, 4600, 4800, 5000, 5200, 5400]:
+	rad_tab['median_contsub_{}'.format(central_lambda)] = stack_contsub[central_lambda]
+	rad_tab['median_contsub_error_{}'.format(central_lambda)] = stack_contsub_error[central_lambda]
 ascii.write(rad_tab, "star_stack_radprof.tab")
 print("Wrote to stack_star_radprof.tab")
 

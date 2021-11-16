@@ -44,6 +44,7 @@ parser.add_argument('--sn_65', type=str, default='True', help='Use only sources 
 parser.add_argument('--sample', type=int, default=3, help='Which sample to use? 1: broad lines. 2: narrow lines, high L. 3: narrow lines, low L.')
 parser.add_argument('--intwidth', type=str, default='', help='Appendix for the fixed integration width: nothing, _4, or _11.')
 parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
+parser.add_argument("--bootstrap", type=int, default=1000, help='Number of boot strap loops for the error estimate.')
 args = parser.parse_args(sys.argv[1:])
 
 fmtstr = " Name: %(user_name)s : %(asctime)s: (%(filename)s): %(levelname)s: %(funcName)s Line: %(lineno)d - %(message)s"
@@ -311,13 +312,61 @@ for mask_name in lae_masks.keys():
 	big_tab_proper["median_troughsub_"+mask_name] = sb_median_kpc
 	big_tab_proper["err_median_troughsub_"+mask_name] = e_sb_median_kpc
 
+	# adjust by redshift: SB x (1+z)**4
+	r_kpc, sb_median_kpc, e_sb_median_kpc = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"][here], long_tab[EXTENSION][here]*(1+long_tab['redshift'][here])**4, long_tab["redshift"][here])
+	big_tab_proper["median_troughsub_"+mask_name+'_ra'] = sb_median_kpc
+	big_tab_proper["err_median_troughsub_"+mask_name+'_ra'] = e_sb_median_kpc
+
+
 big_tab_proper["r/kpc"] = r_kpc
 big_tab_proper["delta_r/kpc"] = r_bins_kpc_xbars
 
-r_kpc, big_tab_proper["median_no_troughsub_all"], big_tab_proper["err_median_no_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux"], long_tab["redshift"])
-r_kpc, big_tab_proper["mean_troughsub_all"], big_tab_proper["err_mean_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
-r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_contsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
+r_kpc, big_tab_proper["median_no_troughsub_all"], big_tab_proper["err_median_no_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux"], long_tab["redshift"])
+r_kpc, big_tab_proper["mean_troughsub_all"], big_tab_proper["err_mean_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="mean")
+r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_troughsub_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab[EXTENSION], long_tab["redshift"], kind="biweight")
 
+############ bootstrapping to get the standard error of the median ############################################################################
+B = args.bootstrap
+logging.info('Starting bootstrapping with B={}.'.format(B))
+
+kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(long_tab['redshift'])/60*u.arcmin/u.kpc
+stack  = []
+stack_ra = []
+fiberarea = np.pi*0.75**2
+data_r = long_tab['r']
+data_flux = long_tab[EXTENSION]
+data_redshift = long_tab['redshift']
+for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
+	here = (data_r*kpc_per_arcsec < r_max)&(data_r*kpc_per_arcsec >= r_min)
+	tmp_flux = data_flux[here]
+	tmp_z = data_redshift[here]
+	stack.append(tmp_flux / fiberarea)
+	stack_ra.append(tmp_flux * (1+tmp_z)**4 / fiberarea)
+
+stack = [np.array(x) for x in stack]
+stack = [x[np.isfinite(x)] for x in stack]
+stack_ra = [np.array(x) for x in stack_ra]
+stack_ra = [x[np.isfinite(x)] for x in stack_ra]
+M = len(stack)
+sample_medians = [[] for i in range(M)]
+sample_medians_ra = [[] for i in range(M)]
+Ns = [len(stack[i]) for i in range(M)]
+for i in range(B):
+	for j in range(M):
+		total_randoms = stack[j]
+		total_randoms_ra = stack_ra[j]
+		total_indices = np.arange(len(stack[j]))
+		new_sample = random.choices(total_indices, k=Ns[j]) # Return a k sized list of elements chosen from the population with replacement.
+		sample_medians[j].append(np.nanmedian(total_randoms[new_sample]))
+		sample_medians_ra[j].append(np.nanmedian(total_randoms_ra[new_sample]))
+
+	logging.info('Finished {}.'.format(i))
+mean_of_medians = [np.nanmean(sample_medians[j]) for j in range(M)]
+std_of_medians = [np.nanstd(sample_medians[j]) for j in range(M)]
+std_of_medians_ra = [np.nanstd(sample_medians_ra[j]) for j in range(M)]
+
+big_tab_proper['err_median_troughsub_bootstrap'] = std_of_medians
+big_tab_proper['err_median_troughsub_bootstrap_ra'] = std_of_medians_ra
 
 ascii.write(big_tab_proper, os.path.join(final_dir, f"radial_profiles_proper_multimasks_new_mask{DIR_APX}_unflagged.tab"))
 

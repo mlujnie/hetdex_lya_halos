@@ -38,7 +38,7 @@ sources["linewidth_km/s"] = doppler_v_of
 
 total_mask = np.ones(len(sources), dtype=bool)
 
-SN_65 = True #(args.sn_65 == 'True')
+SN_65 = True
 if SN_65:
 	print('Including only S/N>6.5.')
 	total_mask = total_mask * (sources['sn']>6.5)
@@ -84,12 +84,13 @@ z_min = np.nanmin(sources["redshift"])
 min_bin_step = 2./(1+z_max) # narrowest bins
 min_bins = np.arange(3470/(1+z_max), 5542/(1+z_min) + min_bin_step, min_bin_step)
 
-big_list = {'central':[]}
+big_list = {'central':[], 'central_lw':[]}
 r_bins_kpc = np.array([0, 5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320])
 r_bins_max_kpc = np.array([5, 10, 15, 20, 25, 30, 40, 60, 80, 160, 320, 800])
 for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
 	appendix = f"{int(r_min)}_{int(r_max)}"
 	big_list[appendix] = []
+	big_list[appendix+'_lw'] = []
 	for i,source in enumerate(sources):
 
 		redshift = source["redshift"]
@@ -97,11 +98,14 @@ for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
 
 		tmp = ascii.read(fin)
 		tab = np.interp(min_bins, tmp["wave_rest"], tmp["spec_troughsub_uf"])
+		tab2 = np.interp(min_bins, tmp['wave_rest'], tmp['spec_troughsub_uf']*4*np.pi*(cosmo.luminosity_distance(redshift).to(u.cm)/u.cm)**2)
 
 		big_list[appendix].append(tab)
+		big_list[appendix+'_lw'].append(tab2)
 
 		if r_min==0:
 			big_list['central'].append(np.interp(min_bins, tmp['wave_rest'], tmp['central']))
+			big_list['central_lw'].append(np.interp(min_bins, tmp['wave_rest'], tmp['central']*4*np.pi*(cosmo.luminosity_distance(redshift).to(u.cm)/u.cm)**2))
 
 		if i%100==0:
 			print(f"Done with {i}/{N}.")
@@ -121,4 +125,4 @@ for appendix in big_list.keys():
 	stack_median["e_"+appendix] = stack_sigma[appendix]
 
 stack_median["wavelength"] = min_bins
-ascii.write(stack_median, "/scratch/05865/maja_n/core_spectra_unflagged_newflag_100/median_spectrum_all_rings.tab")
+ascii.write(stack_median, "/scratch/05865/maja_n/core_spectra_unflagged_newflag_100/median_spectrum_all_rings_{}.tab".format(sample))

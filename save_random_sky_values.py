@@ -214,6 +214,7 @@ for source_idx in range(len(sources)):
 		try:
 			lae_file = glob.glob(lae_file)[0]
 			lae_tab = ascii.read(lae_file)
+			lae_tab['redshift'] = [source['redshift'] for k in range(len(lae_tab))]
 			lae_tab["mask_7"] = np.array(lae_tab["mask_7"]=="True").astype(int)
 			lae_tab["mask_10"] = np.array(lae_tab["mask_10"]=="True").astype(int)
 			bogus_list.append(lae_tab)
@@ -264,8 +265,10 @@ logging.info(f'Extension: {EXTENSION}')
 for mask_name in long_lae_masks.keys():
 	mask = long_lae_masks[mask_name]
 	total_randoms = bogus_tab[EXTENSION][mask]
+	total_redshifts = bogus_tab['redshift'][mask]
 	N = len(total_randoms)
 	bogus_dict["median_troughsub_"+mask_name] = [np.nanmedian(total_randoms)]
+	bogus_dict["median_troughsub_"+mask_name+'_ra'] = [np.nanmedian(total_randoms*(1+total_redshifts)**4)]
 	bogus_dict["perc_lower_median_troughsub_"+mask_name] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
 	bogus_dict["perc_upper_median_troughsub_"+mask_name] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 	bogus_dict["err_median_troughsub_"+mask_name] = [biweight_scale(total_randoms, ignore_nan=True)/np.sqrt(N)]
@@ -305,23 +308,31 @@ bogus_dict["err_median_troughsub_11_all"] = [biweight_scale(total_randoms, ignor
 bogus_dict["err_median_troughsub_11_perc_lower_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 16))/np.sqrt(N)]
 bogus_dict["err_median_troughsub_11d_perc_upper_all"] = [abs(np.nanmedian(total_randoms)-np.nanpercentile(total_randoms, 84))/np.sqrt(N)]
 
+
 ############ bootstrapping to get the standard error of the median ############################################################################
 total_randoms = bogus_tab['flux_troughsub']
+total_redshifts = bogus_tab['redshift']
+total_redshifts = total_redshifts[np.isfinite(total_randoms)]
 total_randoms = total_randoms[np.isfinite(total_randoms)]
+total_indices = np.arange(len(total_randoms))
+
 B = args.bootstrap
 N = len(total_randoms)
 logging.info('Starting bootstrapping with B={} and N={}.'.format(B, N))
 sample_medians = []
+sample_medians_ra = []
 for i in range(B):
-	new_sample = random.choices(total_randoms, k=N) # Return a k sized list of elements chosen from the population with replacement.
-	sample_medians.append(np.nanmedian(new_sample))
+	new_sample = random.choices(total_indices, k=N) # Return a k sized list of elements chosen from the population with replacement.
+	sample_medians.append(np.nanmedian(total_randoms[new_sample]))
+	sample_medians_ra.append(np.nanmedian(total_randoms[new_sample]*(1+total_redshifts[new_sample])**4))
 	logging.info('Finished {}.'.format(i))
 mean_of_medians = np.nanmean(sample_medians)
 std_of_medians = np.nanstd(sample_medians)
+std_of_medians_ra = np.nanstd(sample_medians_ra)
 
 bogus_dict['mean_of_medians_troughsub_all'] = [mean_of_medians]
 bogus_dict['std_of_medians_troughsub_all'] = [std_of_medians]
-
+bogus_dict['std_of_medians_troughsub_all_ra'] = [std_of_medians_ra]
 
 savefile = os.path.join(final_dir, "random_sky_values_multimasks{}.tab".format(DIR_APX))
 ascii.write(bogus_dict, savefile)

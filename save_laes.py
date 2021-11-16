@@ -33,6 +33,7 @@ parser.add_argument("-sr", "--subtract_residual", type=str, default="False", hel
 parser.add_argument("-bc", "--background_correction", type=str, default="False", help="Add wavelength-dependent background correction.")
 parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
 parser.add_argument("-na", "--new_agns", type=str, default = "False", help='Save the 52 new AGNs.')
+parser.add_argument("--museskysub", type=str, default = "False", help="Imitate MUSE's sky subtraction: subtract average spectrum in each IFU.")
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -101,6 +102,17 @@ elif args.farout == "False":
 	print("Going out to 20''.")
 else:
 	print("Could not identify a valid argument for farout: True or False.")
+
+if args.museskysub == "True":
+	MUSE_SKYSUB = True
+	DIR_APX = DIR_APX + "_MUSE"
+	print("Imitating MUSE's sky subtraction: subtracting average spectrum in each IFU.")
+elif args.museskysub == "False":
+	MUSE_SKYSUB = False
+	print("Not applying MUSE's sky subtraction.")
+else:
+	print("Could not identify a valid argument for museskysub: True or False.")
+
 print("Final directory appendix: "+DIR_APX)
 
 
@@ -447,7 +459,7 @@ if args.new_agns == 'True':
 	print('Saving 52 new AGNs.')
 	complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "elixer_plots", "agn_unique_source_ids.txt"))
 else:	   
-	complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources.tab"))
+	complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources_combined.tab"))
 	complete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]
 
 order = np.argsort(complete_lae_tab["shotid"])
@@ -532,6 +544,18 @@ for shotid in np.unique(complete_lae_tab["shotid"]):
 
 	spec_err = shot_tab["calfibe"].copy()
 	spec_err[~np.isfinite(ffskysub)] = np.nan
+
+	if MUSE_SKYSUB:
+		perc = 90
+		for ifu in np.unique(shot_tab["ifuid"]):
+			ifu_here = shot_tab["ifuid"] == ifu
+			medians_lo = np.nanmedian(ffskysub[ifu_here][:,wlcont_lo], axis=1)
+			medians_hi = np.nanmedian(ffskysub[ifu_here][:,wlcont_hi], axis=1)
+			perc_lo = np.nanpercentile(medians_lo, perc)
+			perc_hi = np.nanpercentile(medians_hi, perc)
+			mask_here = (abs(medians_lo)<perc_lo) & (abs(medians_hi)<perc_hi)
+			sky_spectrum_here = np.nanmedian(ffskysub[ifu_here][mask_here], axis=0)
+			ffskysub[ifu_here] -= sky_spectrum_here
 
 	if SUBTRACT_RESIDUAL:
 		# subtract the median spectrum (residual)

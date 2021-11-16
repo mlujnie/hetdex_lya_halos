@@ -1,10 +1,13 @@
 #import multiprocessing
 import time
+import random
 from hetdex_tools.get_spec import get_spectra
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.stats import biweight_scale
+from astropy.cosmology import FlatLambdaCDM
+cosmo = FlatLambdaCDM(H0=67.37, Om0=0.3147)
 
 from hetdex_api.shot import *
 
@@ -13,7 +16,6 @@ import glob
 
 import sys
 import os
-from weighted_biweight import biweight_location_weights_karl
 
 from multiprocessing import Pool
 
@@ -29,7 +31,7 @@ def save_star(detectid):
 		lae_ra, lae_dec = lae["ra"], lae["dec"]
 		lae_coords = SkyCoord(ra = lae_ra*u.deg, dec = lae_dec*u.deg)
 		rs = lae_coords.separation(shot_coords).arcsec
-		mask = rs <= 50
+		mask = rs <= 100
 
 		if len(mask[mask]) < 10:
 			print("{} is empty.".format(detectid))
@@ -57,6 +59,23 @@ def save_star(detectid):
 		weights_sum = np.nansum(weights, axis=1)
 		flux_mean = np.nansum(spec_here[:,wlhere]*weights, axis=1) / weights_sum
 		flux_mean_error = 1./np.sqrt(weights_sum)
+
+		flux_minus_cont, flux_minus_cont_error = {}, {}
+
+		for central_lambda in [3800, 4000, 4200, 4400, 4600, 4800, 5000, 5200, 5400]:
+			#central_lambda = random.choice(sources['wave']) # choose a random central wavelength from the LAE sample.
+
+			loc_cont_wlhere = (abs(def_wave - central_lambda) <= 40) * (abs(def_wave-central_lambda)>17/2.)
+			local_continuum_median = np.nanmedian(spec_here[:,loc_cont_wlhere], axis=1)
+			ones = np.ones(spec_here.shape)
+			ones[~np.isfinite(spec_here)] = 0
+			N = np.nansum(ones[:,loc_cont_wlhere], axis=1)
+			local_continuum_error = np.nanstd(spec_here[:,loc_cont_wlhere], axis=1)/np.sqrt(N)
+
+			loc_wlhere = abs(def_wave - central_lambda) <= 10/2.
+			spec_minus_median_cont = (spec_here.T - local_continuum_median).T
+			flux_minus_cont[central_lambda] = np.nansum(spec_minus_median_cont[:,loc_wlhere], axis=1)
+			flux_minus_cont_error[central_lambda] = np.sqrt(flux_mean_error**2 + local_continuum_error**2)
 		
 		mask = (flux_mean != 0) & (flux_mean_error != 0)
 		rs_0 = rs[mask][:] #/ u.arcsec
@@ -68,7 +87,11 @@ def save_star(detectid):
 		mask_10_here_0 = mask_10_here[mask]
 		lae_ra_0 = lae_ra[mask]
 		lae_dec_0 = lae_dec[mask]
-		
+
+		for cl in flux_minus_cont.keys():
+			flux_minus_cont_error[cl] = flux_minus_cont_error[cl][mask].data[:]
+			flux_minus_cont[cl] = flux_minus_cont[cl][mask].data[:]
+			
 		tab = {"r": rs_0,
 			"ra": lae_ra_0,
 			"dec": lae_dec_0,
@@ -76,6 +99,9 @@ def save_star(detectid):
 			"sigma": flux_mean_error,
 			"mask_7": mask_7_here_0,
 			"mask_10": mask_10_here_0}
+		for cl in flux_minus_cont.keys():
+			tab['flux_contsub_{}'.format(cl)] = flux_minus_cont[cl]
+			tab['flux_contsub_error_{}'.format(cl)] = flux_minus_cont_error[cl]
 		save_file = os.path.join(basedir, f"radial_profiles/stars_skymask/star_{detectid}.dat")
 		ascii.write(tab, save_file)
 		print("Wrote to "+save_file)
@@ -88,7 +114,19 @@ def save_star(detectid):
    
 basedir = "/work/05865/maja_n/stampede2/master"
 complete_lae_tab = ascii.read(os.path.join(basedir, "karls_suggestion", "star_gaia_tab.tab"))
-#complete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]
+sources = ascii.read(os.path.join(basedir, "karls_suggestion", "high_sn_sources_combined.tab"))
+sources = sources[(sources['mask']==1)*(sources['sn']>6.5)]
+# get the luminosity
+z_lae = (sources["wave"]/1215.67)-1
+z_lae_err = (sources["wave_err"]/1215.67)
+sources["redshift"] = z_lae
+sources["luminosity"] = (sources["flux_213"])*1e-17*4*np.pi*(cosmo.luminosity_distance(sources["redshift"]).to(u.cm)/u.cm)**2
+c = 3*10**5 # km/s
+doppler_v_of = c * sources["linewidth"] / sources["wave"]
+sources["linewidth_km/s"] = doppler_v_of
+sources = sources[(sources['linewidth_km/s']<1000/2.35)*(sources['luminosity']<1e43)]
+
+#compddlete_lae_tab = complete_lae_tab[complete_lae_tab["mask"]==1]
 order = np.argsort(complete_lae_tab["shotid"])
 complete_lae_tab = complete_lae_tab[order]
 
@@ -98,11 +136,16 @@ t_oldest = os.path.getmtime(basedir+"/radial_profiles/laes/lae_2100640938.dat")
 for shotid in np.unique(complete_lae_tab["shotid"]):
 	#load the shot table and prepare full-frame sky subtracted spectra
 	laes_here = complete_lae_tab[complete_lae_tab["shotid"]==shotid]
-	done = True 
-	for detectid in laes_here["detectid"].data:
-		#t = os.path.getmtime(os.path.join(basedir, f"radial_profiles/laes/lae_{detectid}.dat"))
-		done *= os.path.exists(os.path.join(basedir, f"radial_profiles/stars_skymask/star_{detectid}.dat")) #t >= t_oldest # CHANGE THIS!!!
-	#os.path.exists(os.path.join(basedir, f"radial_profiles/laes/lae_{detectid}.dat"))
+	done = False #True
+	if done:
+		t_oldest = os.path.getmtime(os.path.join(basedir, "radial_profiles/stars_skymask/star_1596349424488144256.dat"))
+		for detectid in laes_here["detectid"].data:
+			done *= os.path.exists(os.path.join(basedir, "radial_profiles/stars_skymask/star_{}.dat".format(detectid)))
+			if done:
+				t = os.path.getmtime(os.path.join(basedir, "radial_profiles/stars_skymask/star_{}.dat".format(detectid)))
+				done *= t > t_oldest
+			#done *= os.path.exists(os.path.join(basedir, f"radial_profiles/stars_skymask/star_{detectid}.dat")) #t >= t_oldest # CHANGE THIS!!!
+		#os.path.exists(os.path.join(basedir, f"radial_profiles/laes/lae_{detectid}.dat"))
 	if done:
 		print("Already finished", shotid)
 		continue
@@ -116,7 +159,7 @@ for shotid in np.unique(complete_lae_tab["shotid"]):
 	ffskysub[ffskysub==0] = np.nan
 
 	# mask sky lines and regions with large residuals
-	for l_min, l_max in [(3720, 3750), (4850,4870), (4950,4970),(5000,5020),(5455,5470),(5075,5095),(4355,4370)]:
+	for l_min, l_max in [(5455,5470), (5075,5095), (4355,4370)]: #(3720, 3750), (4850,4870), (4950,4970),(5000,5020),(5455,5470),(5075,5095),(4355,4370)]:
 		wlhere = (def_wave >= l_min) & (def_wave <= l_max)
 		ffskysub[:,wlhere] = np.nan
 
@@ -155,13 +198,4 @@ for shotid in np.unique(complete_lae_tab["shotid"]):
 	with Pool(processes=8) as p:
 		tmp = p.map(save_star, laes_here["detectid"].data)	
 	print(f"Finished {shotid}.")	
-	continue
-
-	for detectid in laes_here["detectid"].data:
-		t = os.path.getmtime(os.path.join(basedir, f"radial_profiles/laes/lae_{detectid}.dat"))
-		if t>t_oldest: #os.path.exists(os.path.join(basedir, f"radial_profiles/laes/lae_{detectid}.dat")): CHANGE THIS!!!
-			continue
-		tmp = save_lae(detectid)
-	print(f"Finished {shotid}.")	
-
 

@@ -242,7 +242,6 @@ else:
 
 narrow_lines = sources["linewidth_km/s"] < 1000/2.35
 low_luminosity = sources["luminosity"] < 10**43
-
 broad_line_sample = ~narrow_lines
 logging.info('1. The broad line sample contains {} sources.'.format(len(broad_line_sample[broad_line_sample])))
 
@@ -388,6 +387,12 @@ for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
 		r_kpc, sb_median_kpc, e_sb_median_kpc = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"][here], long_tab[EXTENSION][here], long_tab["redshift"][here])
 		big_tab_proper["median_troughsub_"+mask_name] = sb_median_kpc
 		big_tab_proper["err_median_troughsub_"+mask_name] = e_sb_median_kpc
+
+		# adjust by redshift: SB x (1+z)**4
+		r_kpc, sb_median_kpc, e_sb_median_kpc = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"][here], long_tab[EXTENSION][here]*(1+long_tab['redshift'][here])**4, long_tab["redshift"][here])
+		big_tab_proper["median_troughsub_"+mask_name+'_ra'] = sb_median_kpc
+		big_tab_proper["err_median_troughsub_"+mask_name+'_ra'] = e_sb_median_kpc
+
 
 	big_tab_proper["r/kpc"] = r_kpc
 	big_tab_proper["delta_r/kpc"] = r_bins_kpc_xbars
