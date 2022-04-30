@@ -30,6 +30,7 @@ parser.add_argument("-f", "--farout", type=str, default="False", help="Measure s
 parser.add_argument("--samelambda", type=str, default='False', help='Use the Lya wavelength as the central wavelength and make sure that the fiber is further away than 2.')
 parser.add_argument("--museskysub", type=str, default = "False", help="Imitate MUSE's sky subtraction: subtract average spectrum in each IFU.")
 parser.add_argument('--flagkarl', type=str, default='False', help='Flagging all fibers that Karl would flag in the sky subtraction.')
+parser.add_argument('--hdr3', type=str, default='False', help='Use HDR3 data.')
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -117,16 +118,30 @@ elif args.flagkarl == 'False':
 else:
 	print("Could not identify a valid argument for flagkarl: True or False.")
 
+if args.hdr3 == 'True':
+	HDR3 = True
+	DIR_APX = DIR_APX + '_hdr3'
+	print('Using HDR3')
+elif args.hdr3 == 'False':
+	HDR3 = False
+	print('Using HDR2.1')
+else:
+	print('Wrong argument for hdr3: True or False.')
+
+
 
 DIR_APX = DIR_APX 
 print("Final directory appendix: "+DIR_APX)
 
 
 def load_shot(shot):
-        fileh = open_shot_file(shot)
-        table = Table(fileh.root.Data.Fibers.read())
-        fileh.close()
-        return table
+	if HDR3:
+	 	fileh = open_shot_file(shot, survey='hdr3')
+	else:	
+		fileh = open_shot_file(shot)
+	table = Table(fileh.root.Data.Fibers.read())
+	fileh.close()
+	return table
 
 def save_lae(detectid):
 	lae = complete_lae_tab[complete_lae_tab["detectid"]==detectid]
@@ -225,7 +240,7 @@ def save_lae(detectid):
 					av_std = biweight_scale(averages[fibers_here], ignore_nan=True)
 					outliers = abs(averages - av_average) > 3*av_std
 					new_mask_tmp[outliers] = 0
-					print("{:.1f}% unmasked after first step for LAE {}.".format(100*sum(new_mask_tmp)/len(new_mask_tmp), detectid))
+					#print("{:.1f}% unmasked after first step for LAE {}.".format(100*sum(new_mask_tmp)/len(new_mask_tmp), detectid))
 					
 					new_mask_dict = {}
 					for cutoff in [0, 5, 10]:
@@ -250,7 +265,7 @@ def save_lae(detectid):
 				new_mask[cutoff] = new_masks[0][cutoff] * new_masks[1][cutoff]
 				# make sure that the central 2'' are unmasked:
 				new_mask[cutoff][rs <= 2.0 * u.arcsec] = 1
-			print("{:.1f}% unmasked with {}% cutoff for LAE {}.".format(100*sum(new_mask[5])/len(new_mask[5]),5, detectid))
+			#print("{:.1f}% unmasked with {}% cutoff for LAE {}.".format(100*sum(new_mask[5])/len(new_mask[5]),5, detectid))
 			print("Are the masks the same?", np.unique(new_mask[0] == new_mask[10]))
 
 
@@ -263,7 +278,7 @@ def save_lae(detectid):
 		trough_contsub = (spec_here.T - trough_continuum).T
 		trough_contsub_error = np.sqrt(err_here.T**2 + trough_continuum_error**2).T
     
-		cont_wlhere_2 = (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>3.5*lae_linewidth)
+		cont_wlhere_2 = (def_wave > lae_wave) * (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>2.5*lae_linewidth)
 		trough_continuum_2 = np.nanmedian(spec_here[:,cont_wlhere_2], axis=1)
 		N = np.nansum(ones[:,cont_wlhere_2], axis=1)
 		trough_continuum_error_2 = biweight_scale(spec_here[:,cont_wlhere_2], axis=1) / np.sqrt(N)
@@ -399,6 +414,7 @@ c = np.nanmin([np.ones(1036)*(1035-190), b-190], axis=0)
 filter_min = np.array(c, dtype=int)
 filter_max = np.array(b, dtype=int)
 
+#t_oldest = os.path.getmtime(os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}/bogus_2_2100641208.dat"))
 for shotid in np.unique(complete_lae_tab["shotid"]):
 
 	#load the shot table and prepare full-frame sky subtracted spectra
@@ -409,7 +425,7 @@ for shotid in np.unique(complete_lae_tab["shotid"]):
 	done = True
 	for detectid in laes_here["detectid"].data:
 		done *= os.path.exists(os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}/bogus_2_{detectid}.dat"))
-
+		#done *= os.path.getmtime(os.path.join(savedir, f"radial_profiles/bogus_laes{DIR_APX}/bogus_2_{detectid}.dat")) >= t_oldest
 	if done:
 		print("Already finished", shotid)
 		continue
@@ -422,6 +438,8 @@ for shotid in np.unique(complete_lae_tab["shotid"]):
 
 	if LOCAL_SKYSUB:
 		ffskysub = shot_tab["calfib"].copy()
+	elif HDR3:
+		ffskysub = shot_tab["calfib_ffsky"].copy()
 	else:
 		ffskysub = shot_tab["spec_fullsky_sub"].copy()
 	ffskysub[ffskysub==0] = np.nan

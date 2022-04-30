@@ -299,15 +299,16 @@ r_bins_xbars = (r_bins_max-r_bins)/2.
 # shifted LAE data
 all_shifts = {}
 for d_wl in [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105,
-			-10, -15, -20, -25, -30, -35, -40, -45, -50, -55, -60, -65, -70, -75, -80, -85, -90, -95, -100, -105]:
+			-10, -15, -20, -25, -30, -35, -40, -45, -50, -55, -60, -65, -70, -75, -80, -85, -90, -95, -100, -105][::-1]:
 
 	long_lae_masks = {}
 	for key in lae_masks.keys():
 		long_lae_masks[key] = []
 
 
-	save_file = os.path.join(args.final_dir, "radial_profiles_empty_wlshift/radial_profiles_proper_multimask_{}_{}.tab".format(DIR_APX, d_wl))
-	if False: #os.path.exists(save_file):
+	save_file = os.path.join(args.final_dir, "radial_profiles_empty_wlshift/radial_profiles_proper_multimask{}_{}.tab".format(DIR_APX, d_wl))
+	logging.info(save_file)
+	if os.path.exists(save_file):
 		logging.info(f"Skipping {save_file}: already exists.")
 		continue
 

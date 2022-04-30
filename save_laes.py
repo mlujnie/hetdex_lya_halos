@@ -34,6 +34,7 @@ parser.add_argument("-bc", "--background_correction", type=str, default="False",
 parser.add_argument("-f", "--farout", type=str, default="False", help="Measure surface brightness out to 100''.")
 parser.add_argument("-na", "--new_agns", type=str, default = "False", help='Save the 52 new AGNs.')
 parser.add_argument("--museskysub", type=str, default = "False", help="Imitate MUSE's sky subtraction: subtract average spectrum in each IFU.")
+parser.add_argument('--hdr3', type=str, default='False', help='Use HDR3 data.')
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -113,16 +114,29 @@ elif args.museskysub == "False":
 else:
 	print("Could not identify a valid argument for museskysub: True or False.")
 
+if args.hdr3 == 'True':
+	HDR3 = True
+	DIR_APX = DIR_APX + '_hdr3'
+	print('Using HDR3')
+elif args.hdr3 == 'False':
+	HDR3 = False
+	print('Using HDR2.1')
+else:
+	print('Wrong argument for hdr3: True or False.')
+
 print("Final directory appendix: "+DIR_APX)
 
 
 ########## Define some functions #############################
 
 def load_shot(shot):
-        fileh = open_shot_file(shot)
-        table = Table(fileh.root.Data.Fibers.read())
-        fileh.close()
-        return table
+	if HDR3:
+		fileh = open_shot_file(shot, survey='hdr3')
+	else:
+		fileh = open_shot_file(shot)
+	table = Table(fileh.root.Data.Fibers.read())
+	fileh.close()
+	return table
  
 def save_lae(detectid):
 	lae = complete_lae_tab[complete_lae_tab["detectid"]==detectid]
@@ -233,7 +247,7 @@ def save_lae(detectid):
 	trough_contsub = (spec_here.T - trough_continuum).T
 	trough_contsub_error = np.sqrt(err_here.T**2 + trough_continuum_error**2).T
 	
-	cont_wlhere_2 = (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>3.5*lae_linewidth)
+	cont_wlhere_2 = (def_wave > lae_wave) * (abs(def_wave - lae_wave) <= 40) & (abs(def_wave - lae_wave)>2.5*lae_linewidth)
 	trough_continuum_2 = np.nanmedian(spec_here[:,cont_wlhere_2], axis=1)
 	N = np.nansum(ones[:,cont_wlhere_2], axis=1)
 	trough_continuum_error_2 = biweight_scale(spec_here[:,cont_wlhere_2], axis=1) / np.sqrt(N)
@@ -531,7 +545,7 @@ for shotid in np.unique(complete_lae_tab["shotid"]):
 	#load the shot table and prepare full-frame sky subtracted spectra
 
 	laes_here = complete_lae_tab[complete_lae_tab["shotid"]==shotid]
-	done = True 
+	done = False #True 
 	for detectid in laes_here["detectid"].data:
 		done *= os.path.exists(os.path.join(savedir, f"core_spectra_unflagged{DIR_APX}/lae_{detectid}.dat"))
 	if done:
@@ -546,6 +560,8 @@ for shotid in np.unique(complete_lae_tab["shotid"]):
 
 	if LOCAL_SKYSUB:
 		ffskysub = shot_tab["calfib"].copy() # local sky subtraction
+	elif HDR3:
+		ffskysub = shot_tab["calfib_ffsky"].copy()  # full frame sky subtraction
 	else:
 		ffskysub = shot_tab["spec_fullsky_sub"].copy()  # full frame sky subtraction
 	ffskysub[ffskysub==0] = np.nan

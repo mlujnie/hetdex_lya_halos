@@ -231,13 +231,14 @@ long_lae_masks = {}
 for key in lae_masks.keys():
 	long_lae_masks[key] = []
 
-savedir = "/scratch/05865/maja_n"
+savedir = '/work2/05865/maja_n/stampede2/master/karls_suggestion' #"/scratch/05865/maja_n"
 
 # real LAE data
 logging.info("Reading LAEs...")
 long_list = []
 i=0
 N = len(sources)
+used_detectids = []
 for source_idx in range(len(sources)):
 	source = sources[source_idx]
 
@@ -260,11 +261,14 @@ for source_idx in range(len(sources)):
 				long_lae_masks[mask_name].append(lae_masks[mask_name][source_idx])
 
 		i+=1
+		used_detectids.append(detectid)
 		if i%100 == 0:
 			logging.info(f"Finished {i}/{N}")
 	except Exception as e:
 		logging.info("Failed to read "+lae_file)
 logging.info("{} LAEs are non-empty.".format(i))
+np.savetxt('used_detectids.txt', used_detectids)
+sys.exit()
 		
 long_tab = vstack(long_list)
 long_tab["mask_7"] = (long_tab["mask_7"]=="True").astype(bool)
@@ -327,6 +331,7 @@ r_kpc, big_tab_proper["biweight_troughsub_all"], big_tab_proper["err_biweight_tr
 r_kpc, big_tab_proper["median_troughsub_2_all"], big_tab_proper["err_median_troughsub_2_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["flux_troughsub_2"], long_tab["redshift"])
 r_kpc, big_tab_proper["median_redcontinuum_all"], big_tab_proper["err_median_redcontinuum_all"] = get_stack_proper(r_bins_kpc, r_bins_max_kpc, long_tab["r"], long_tab["red_cont_flux"], long_tab["redshift"])
 
+
 ############ bootstrapping to get the standard error of the median ############################################################################
 B = args.bootstrap
 logging.info('Starting bootstrapping with B={}.'.format(B))
@@ -340,6 +345,11 @@ data_flux = {EXTENSION: long_tab[EXTENSION],
             'flux_troughsub_2': long_tab['flux_troughsub_2'],
             'red_cont_flux': long_tab['red_cont_flux']}
 data_redshift = long_tab['redshift']
+
+big_tab_proper['N_fibers'] = [len(long_tab[(data_r*kpc_per_arcsec < r_max)&(data_r*kpc_per_arcsec >= r_min)]) for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc)]
+big_tab_proper['N_laes'] = [len(np.unique(long_tab['detectid'][(data_r*kpc_per_arcsec < r_max)&(data_r*kpc_per_arcsec >= r_min)])) for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc)]
+print(big_tab_proper.keys())
+
 for r_min, r_max in zip(r_bins_kpc, r_bins_max_kpc):
     here = (data_r*kpc_per_arcsec < r_max)&(data_r*kpc_per_arcsec >= r_min)
     for key in stack.keys():
